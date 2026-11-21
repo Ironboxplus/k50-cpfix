@@ -1,24 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0
-/* Host unit test for kernel/cpfix_policy.h: cc -std=c11 -Wall -Werror -I kernel tests/policy_test.c */
-#include <stdio.h>
-
+/* Host unit test for kernel/cpfix_policy.h: cc -std=c11 -Wall -Werror -I kernel -I tests tests/policy_test.c */
+#include "check.h"
 #include "cpfix_policy.h"
-
-static int passed, failed;
-
-#define EQ(got, want, ...)                                                   \
-	do {                                                                 \
-		long long g_ = (got), w_ = (want);                           \
-		if (g_ == w_) {                                              \
-			passed++;                                            \
-		} else {                                                     \
-			failed++;                                            \
-			printf("FAIL %s:%d: %s = %lld, want %lld  (", __FILE__, \
-			       __LINE__, #got, g_, w_);                      \
-			printf(__VA_ARGS__);                                 \
-			printf(")\n");                                       \
-		}                                                            \
-	} while (0)
 
 struct param {
 	const char *name;
@@ -33,7 +16,7 @@ static const struct param params[] = {
 
 static void test_param_table(void)
 {
-	/* Ranges and defaults from PLAN §2.3 and the P7 addendum. */
+	/* Ranges and defaults from PLAN §2.3, the P7 addendum and the second revision. */
 	static const struct param want[] = {
 		{ "enable", 1, 0, 1, 0 },
 		{ "entry_vbat_margin_mv", 90, 0, 250, 0 },
@@ -47,6 +30,9 @@ static void test_param_table(void)
 		{ "batt_temp_lo", 400, 300, 460, 0 },
 		{ "fcc_cap_ma", 0, 500, 12400, 1 },
 		{ "cable_res_mohm", 1000, 350, 1500, 0 },
+		{ "cable_margin_mohm", 150, 50, 400, 0 },
+		{ "fv_drop_max_mv", 0, 0, 100, 0 },
+		{ "fv_ceiling_mv", 4440, 4000, 4440, 0 },
 	};
 	unsigned int i, j, n = sizeof(params) / sizeof(params[0]);
 
@@ -95,6 +81,13 @@ static void test_clamp_boundaries(void)
 	EQ(cpfix_clamp_param(251, 0, 250, 0), 250, "margin 251");
 	EQ(cpfix_clamp_param(49, 50, 95, 1), 50, "high_soc 49");
 	EQ(cpfix_clamp_param(96, 50, 95, 1), 95, "high_soc 96");
+	EQ(cpfix_clamp_param(49, 50, 400, 0), 50, "cable_margin 49");
+	EQ(cpfix_clamp_param(401, 50, 400, 0), 400, "cable_margin 401");
+	EQ(cpfix_clamp_param(-1, 0, 100, 0), 0, "fv_drop -1");
+	EQ(cpfix_clamp_param(101, 0, 100, 0), 100, "fv_drop 101");
+	EQ(cpfix_clamp_param(3999, 4000, 4440, 0), 4000, "fv_ceiling 3999");
+	EQ(cpfix_clamp_param(4441, 4000, 4440, 0), 4440, "fv_ceiling 4441");
+	EQ(cpfix_clamp_param(4500, 4000, 4440, 0), 4440, "fv_ceiling never above DT fv");
 }
 
 static void test_high_soc(void)
@@ -179,6 +172,89 @@ static void test_fcc_cap(void)
 	EQ(cpfix_cap_decide(0, 3000, 0, &en, &val), 0, "enable=0 nothing voted");
 }
 
+static void test_fv(void)
+{
+	/* P8: diff_fv_val 100 limited to fv_drop_max_mv */
+	EQ(cpfix_fv_drop(100, 0), 0, "drop removed");
+	EQ(cpfix_fv_drop(100, 50), 50, "drop limited");
+	EQ(cpfix_fv_drop(30, 50), 30, "smaller drop kept");
+	EQ(cpfix_fv_drop(100, 100), 100, "max = stock");
+	EQ(cpfix_fv_drop(0, 0), 0, "no drop");
+	/* P6 on CHARGER_FV */
+	EQ(cpfix_fv_vote_value(1, 1, 4450, 1, 4440), 4440, "JEITA 4450 capped");
+	EQ(cpfix_fv_vote_value(1, 1, 4470, 1, 4440), 4440, "FFC 4440+30 compensation capped");
+	EQ(cpfix_fv_vote_value(1, 1, 4340, 1, 4440), 4340, "lower vote untouched");
+	EQ(cpfix_fv_vote_value(1, 1, 4440, 1, 4440), 4440, "equal");
+	EQ(cpfix_fv_vote_value(1, 1, 4450, 1, 4000), 4000, "min ceiling");
+	EQ(cpfix_fv_vote_value(0, 1, 4450, 1, 4440), 4450, "not the fv votable");
+	EQ(cpfix_fv_vote_value(1, 0, 4450, 1, 4440), 4450, "disabled vote");
+	EQ(cpfix_fv_vote_value(1, 1, 4450, 0, 4440), 4450, "cpfix off");
+}
+
+static void test_clamp_step(void)
+{
+	struct cpfix_clamp_state s;
+	int r, i;
+
+	/*
+	 * Each request below stays within the previous bound
+	 * (vbus + ibus * r_eff / 1000 + 20) unless a test wants a clamped round.
+	 */
+	cpfix_clamp_reset(&s);
+	/* no sample yet: stock + margin */
+	EQ(cpfix_clamp_step(&s, 8200, 8200, 0, 1000, 1000, 150), 500, "first hit");
+	/* ibus below 500 mA: no learning */
+	EQ(cpfix_clamp_step(&s, 8210, 8150, 400, 1500, 1000, 150), 500, "low ibus");
+	EQ(s.n, 0, "nothing learned below 500 mA");
+	/* gap 430 mV at 1000 mA: 430 mOhm learned, r_eff 580 */
+	EQ(cpfix_clamp_step(&s, 8360, 7930, 1000, 2000, 1000, 150), 580, "learn 430");
+	EQ(s.r_learned, 430, "r_learned");
+	/* a larger sample does not raise the minimum */
+	EQ(cpfix_clamp_step(&s, 8530, 7930, 1000, 2500, 1000, 150), 580, "larger sample");
+	EQ(s.n, 2, "two samples");
+
+	/* below stock: floor at 350 */
+	cpfix_clamp_reset(&s);
+	cpfix_clamp_step(&s, 8000, 8000, 0, 0, 1000, 150);
+	EQ(cpfix_clamp_step(&s, 8020, 7890, 1000, 500, 1000, 150), 500, "130 mOhm floors at stock");
+	/* hard upper bound cable_res_mohm */
+	EQ(cpfix_clamp_step(&s, 8130, 8000, 1000, 1000, 400, 150), 400, "capped by cable_res");
+	/* r_max at stock returns stock */
+	EQ(cpfix_clamp_step(&s, 8130, 8000, 1000, 1500, 350, 400), 350, "cap at stock");
+
+	/* a clamped round is not learned: last bound 7590 + 1000 * 580 / 1000 = 8170 */
+	cpfix_clamp_reset(&s);
+	cpfix_clamp_step(&s, 8000, 8000, 0, 0, 1500, 150);
+	cpfix_clamp_step(&s, 8020, 7590, 1000, 500, 1500, 150);	/* learns 430 -> 580 */
+	EQ(s.n, 1, "one sample");
+	r = cpfix_clamp_step(&s, 8170 + 21, 7590, 1000, 1000, 1500, 150);
+	EQ(s.n, 1, "request over last bound + 20: not sampled");
+	EQ(r, 580, "r_eff unchanged");
+	cpfix_clamp_step(&s, 8170 + 20, 7590, 1000, 1500, 1500, 150);
+	EQ(s.n, 2, "within the 20 mV slack: sampled");
+
+	/* window: minimum of the last 8 samples, older ones age out (margin 400 keeps headroom) */
+	cpfix_clamp_reset(&s);
+	EQ(cpfix_clamp_step(&s, 8000, 8000, 0, 0, 1500, 400), 750, "stock + 400");
+	cpfix_clamp_step(&s, 8020, 7620, 1000, 100, 1500, 400);	/* 400 */
+	EQ(s.r_learned, 400, "first sample 400");
+	for (i = 0; i < 7; i++)
+		cpfix_clamp_step(&s, 8040, 7440, 1000, 200 + 100 * i, 1500, 400);	/* 600 */
+	EQ(s.n, 8, "window full");
+	EQ(s.r_learned, 400, "400 still in the window");
+	cpfix_clamp_step(&s, 8040, 7440, 1000, 1000, 1500, 400);
+	EQ(s.n, 8, "window stays at 8");
+	EQ(s.r_learned, 600, "400 aged out");
+
+	/* leaving TUNE: more than 5000 ms since the last hit resets the learning */
+	EQ(cpfix_clamp_step(&s, 8000, 8000, 0, 1000 + 5000, 1500, 400), 1000, "5000 ms: kept");
+	EQ(cpfix_clamp_step(&s, 8000, 8000, 0, 6000 + 5001, 1500, 400), 750, "5001 ms: reset");
+	EQ(s.n, 0, "samples cleared");
+	/* request not above vbus: nothing to learn */
+	EQ(cpfix_clamp_step(&s, 8000, 8100, 1000, 11500, 1500, 400), 750, "negative gap");
+	EQ(s.n, 0, "no sample from negative gap");
+}
+
 int main(void)
 {
 	test_param_table();
@@ -188,6 +264,7 @@ int main(void)
 	test_staleness();
 	test_vote_rewrite();
 	test_fcc_cap();
-	printf("passed %d failed %d total %d\n", passed, failed, passed + failed);
-	return failed ? 1 : 0;
+	test_fv();
+	test_clamp_step();
+	return check_report();
 }

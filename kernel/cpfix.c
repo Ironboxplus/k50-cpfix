@@ -37,9 +37,10 @@ int get_effective_result(struct votable *votable);
 
 #define CPFIX_USER_VOTER "CPFIX_USER_VOTER"
 #define PDPM_DT_HIGH_SOC 0x1c0		/* struct usbpd_pm: DT high_soc (u32) */
+#define PDPM_REQUEST_VOLTAGE 0x28c	/* struct usbpd_pm: request_voltage (int, mV) */
 #define CPFIX_POLL_MS 2000
 
-static struct votable *cpfix_fcc;
+static struct votable *cpfix_fcc, *cpfix_fv;
 static bool cpfix_armed;		/* set only after every probe is verified */
 static bool cpfix_ready;		/* work initialised, guarded by cpfix_lock */
 static DEFINE_MUTEX(cpfix_lock);
@@ -182,27 +183,64 @@ static int cpfix_pre_p5(struct kprobe *p, struct pt_regs *regs)
 	return 0;
 }
 
-/* P6 vote() entry: raise THERMAL_VOTER on CHARGER_FCC while the battery is cool */
+/*
+ * P6 vote() entry: raise THERMAL_VOTER on CHARGER_FCC while the battery is cool;
+ * cap every enabled CHARGER_FV vote at fv_ceiling_mv.
+ */
 static int cpfix_pre_p6(struct kprobe *p, struct pt_regs *regs)
 {
+	struct votable *v = (struct votable *)regs->regs[0];
 	int val, nv;
 
-	if (!cpfix_on(p) || (struct votable *)regs->regs[0] != cpfix_fcc)
+	if (!cpfix_on(p) || (v != cpfix_fcc && v != cpfix_fv))
 		return 0;
 	val = (int)regs->regs[3];
-	nv = cpfix_vote_value(1, (const char *)regs->regs[1], (u8)regs->regs[2], val,
-			      READ_ONCE(cp_thermal_override), cpfix_thermal_now(),
-			      READ_ONCE(cp_thermal_override_ma));
+	if (v == cpfix_fcc)
+		nv = cpfix_vote_value(1, (const char *)regs->regs[1], (u8)regs->regs[2], val,
+				      READ_ONCE(cp_thermal_override), cpfix_thermal_now(),
+				      READ_ONCE(cp_thermal_override_ma));
+	else
+		nv = cpfix_fv_vote_value(1, (u8)regs->regs[2], val, 1, READ_ONCE(cp_fv_ceiling_mv));
 	if (nv != val)
 		set_w(regs, 3, nv);
 	return 0;
 }
 
-/* P7 pdm_main_sm `mul w8,w8,w11`: cable resistance of the tune clamp, stock 350 mOhm */
+/*
+ * P7 pdm_main_sm `mul w8,w8,w11`: resistance of the tune clamp, stock 350 mOhm,
+ * learned from the cable (cpfix_clamp_step). Here w8 = total_ibus, w10 =
+ * master_cp_vbus, pdpm+0x28c = last request. Only this handler touches the
+ * state: pdm_main_sm runs from a single work item.
+ */
+static struct cpfix_clamp_state cpfix_clamp_st;
+
 static int cpfix_pre_p7(struct kprobe *p, struct pt_regs *regs)
 {
+	int req_prev, r;
+
+	if (!cpfix_on(p))
+		return 0;
+	req_prev = READ_ONCE(*(int *)(regs->regs[19] + PDPM_REQUEST_VOLTAGE));
+	r = cpfix_clamp_step(&cpfix_clamp_st, req_prev, (int)regs->regs[10], (int)regs->regs[8],
+			     jiffies_to_msecs(jiffies), READ_ONCE(cp_cable_res_mohm),
+			     READ_ONCE(cp_cable_margin_mohm));
+	set_w(regs, 11, r);
+	return 0;
+}
+
+/* P8a charge_monitor_func `sub w8,w9,w10`: w10 = diff_fv_val of the FFC_VOTER vote */
+static int cpfix_pre_p8_x10(struct kprobe *p, struct pt_regs *regs)
+{
 	if (cpfix_on(p))
-		set_w(regs, 11, READ_ONCE(cp_cable_res_mohm));
+		set_w(regs, 10, cpfix_fv_drop((int)regs->regs[10], READ_ONCE(cp_fv_drop_max_mv)));
+	return 0;
+}
+
+/* P8b/P8c `sub w8,w8,w9`: w9 = diff_fv_val of the FFC_VOTER / JEITA_CHARGE_VOTER vote */
+static int cpfix_pre_p8_x9(struct kprobe *p, struct pt_regs *regs)
+{
+	if (cpfix_on(p))
+		set_w(regs, 9, cpfix_fv_drop((int)regs->regs[9], READ_ONCE(cp_fv_drop_max_mv)));
 	return 0;
 }
 
@@ -341,6 +379,21 @@ static ssize_t fcc_effective_show(struct kobject *kobj, struct kobj_attribute *a
 	return scnprintf(buf, PAGE_SIZE, "%d\n", get_effective_result(cpfix_fcc));
 }
 
+/* learned tune clamp: r_learned r_eff samples last_vbus last_ibus last_req (mOhm, mV, mA) */
+static ssize_t clamp_show(struct kobject *kobj, struct kobj_attribute *attr, char *buf)
+{
+	const struct cpfix_clamp_state *s = &cpfix_clamp_st;
+
+	return scnprintf(buf, PAGE_SIZE, "%d %d %d %d %d %d\n", READ_ONCE(s->r_learned),
+			 READ_ONCE(s->last_r_eff), READ_ONCE(s->n), READ_ONCE(s->last_vbus),
+			 READ_ONCE(s->last_ibus), READ_ONCE(s->last_req));
+}
+
+static ssize_t fv_effective_show(struct kobject *kobj, struct kobj_attribute *attr, char *buf)
+{
+	return scnprintf(buf, PAGE_SIZE, "%d\n", get_effective_result(cpfix_fv));
+}
+
 static ssize_t version_show(struct kobject *kobj, struct kobj_attribute *attr, char *buf)
 {
 	return scnprintf(buf, PAGE_SIZE, "%s\n", CPFIX_VERSION);
@@ -351,6 +404,8 @@ static struct kobj_attribute cpfix_attr_batt_temp = __ATTR_RO(batt_temp);
 static struct kobj_attribute cpfix_attr_batt_temp_age_ms = __ATTR_RO(batt_temp_age_ms);
 static struct kobj_attribute cpfix_attr_thermal_active = __ATTR_RO(thermal_active);
 static struct kobj_attribute cpfix_attr_fcc_effective = __ATTR_RO(fcc_effective);
+static struct kobj_attribute cpfix_attr_clamp = __ATTR_RO(clamp);
+static struct kobj_attribute cpfix_attr_fv_effective = __ATTR_RO(fv_effective);
 static struct kobj_attribute cpfix_attr_version = __ATTR_RO(version);
 
 static struct attribute *cpfix_attrs[] = {
@@ -359,6 +414,8 @@ static struct attribute *cpfix_attrs[] = {
 	&cpfix_attr_batt_temp_age_ms.attr,
 	&cpfix_attr_thermal_active.attr,
 	&cpfix_attr_fcc_effective.attr,
+	&cpfix_attr_clamp.attr,
+	&cpfix_attr_fv_effective.attr,
 	&cpfix_attr_version.attr,
 	NULL,
 };
@@ -378,6 +435,12 @@ static int __init cpfix_init(void)
 		pr_err("votable CHARGER_FCC not found\n");
 		return -ENODEV;
 	}
+	cpfix_fv = find_votable("CHARGER_FV");
+	if (IS_ERR_OR_NULL(cpfix_fv)) {
+		pr_err("votable CHARGER_FV not found\n");
+		return -ENODEV;
+	}
+	cpfix_clamp_reset(&cpfix_clamp_st);
 
 	ret = cpfix_register_all();
 	if (ret)

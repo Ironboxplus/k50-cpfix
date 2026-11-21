@@ -16,3 +16,6 @@ PP(P4, "pd_cp_manager", "pdm_taper_reduce_current", 0x5c, 0x2a0003f5, cpfix_pre_
 PP(P5, "mtk_charger_framework", "charge_monitor_func", 0xd50, 0x340000ca, cpfix_pre_p5)
 PP(P6, "mtk_charger_framework", "vote", 0x0, 0xd503233f, cpfix_pre_p6)
 PP(P7, "pd_cp_manager", "pdm_main_sm", 0xcb0, 0x1b0b7d08, cpfix_pre_p7)
+PP(P8a, "mtk_charger_framework", "charge_monitor_func", 0xe30, 0x4b0a0128, cpfix_pre_p8_x10)
+PP(P8b, "mtk_charger_framework", "charge_monitor_func", 0xea0, 0x4b090108, cpfix_pre_p8_x9)
+PP(P8c, "mtk_charger_framework", "charge_monitor_func", 0x1b00, 0x4b090108, cpfix_pre_p8_x9)

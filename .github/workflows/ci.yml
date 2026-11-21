@@ -84,7 +84,7 @@ jobs:
             echo "$j=$v"
           done
           n=$(git rev-list --count HEAD)
-          echo "version=0.1.$n-$(git rev-parse --short=12 HEAD)" >> "$GITHUB_OUTPUT"
+          echo "version=0.2.$n-$(git rev-parse --short=12 HEAD)" >> "$GITHUB_OUTPUT"
 
   kernel-build:
     needs: select
@@ -154,8 +154,13 @@ jobs:
       - name: Policy unit test (host gcc)
         run: |
           mkdir -p out
-          gcc -std=c11 -Wall -Wextra -Werror -I kernel -o out/policy_test tests/policy_test.c
+          gcc -std=c11 -Wall -Wextra -Werror -I kernel -I tests -o out/policy_test tests/policy_test.c
           ./out/policy_test
+      - name: Tune clamp simulation (sources A-D, static-clamp negative controls)
+        if: ${{ !cancelled() }}
+        run: |
+          gcc -std=c11 -Wall -Wextra -Werror -I kernel -I tests -o out/clamp_sim tests/clamp_sim.c
+          ./out/clamp_sim
       - name: Patch points against the vendor fixtures
         if: ${{ !cancelled() }}
         run: python tools/verify_patchpoints.py

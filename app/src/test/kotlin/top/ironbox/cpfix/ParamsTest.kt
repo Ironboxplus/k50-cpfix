@@ -22,7 +22,7 @@ class ParamsTest {
     @Test
     fun matchesKernelHeader() {
         val c = kernelParams()
-        assertEquals(12, c.size)
+        assertEquals(15, c.size)
         assertEquals(c, Params.all.map { CParam(it.name, it.default, it.min, it.max, it.zeroOk) })
     }
 
