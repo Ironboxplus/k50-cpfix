@@ -8,7 +8,9 @@ val keystore = System.getenv("SIGNING_KEYSTORE")?.let(::file)?.takeIf { it.isFil
 
 android {
     namespace = "top.ironbox.cpfix"
-    compileSdk = 37
+    compileSdk {
+        version = release(37) { minorApiLevel = 2 }
+    }
 
     defaultConfig {
         applicationId = "top.ironbox.cpfix"

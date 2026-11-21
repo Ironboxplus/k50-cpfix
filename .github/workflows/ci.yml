@@ -94,6 +94,22 @@ jobs:
       image: ghcr.io/ylarod/ddk-min:android12-5.10-20260828
     steps:
       - uses: actions/checkout@v7
+      - name: Restore upstream modpost symbol attribution
+        run: |
+          set -eu
+          # The DDK's modpost has `s->module = exp->module;` commented out (KernelSU's loader
+          # resolves symbols itself). Without it modpost writes neither __versions entries nor
+          # depends=, and a CONFIG_MODVERSIONS kernel refuses the module. Put the line back.
+          SRC=/opt/ddk/src/android12-5.10
+          MP=$SRC/scripts/mod/modpost.c
+          grep -nE 'check_exports\(mod\);|s->module = exp->module;' "$MP" || true
+          if grep -qE '^[[:space:]]*//[[:space:]]*s->module = exp->module;' "$MP"; then
+            sed -i -E 's#^([[:space:]]*)//[[:space:]]*(s->module = exp->module;)#\1\2#' "$MP"
+            grep -nE 's->module = exp->module;' "$MP"
+            make -C "$SRC" O="$KDIR" modules_prepare -j"$(nproc)"
+          else
+            echo "modpost already attributes symbols"
+          fi
       - name: Build cpfix.ko
         env:
           CPFIX_VERSION: ${{ needs.select.outputs.version }}
