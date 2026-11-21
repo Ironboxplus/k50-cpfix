@@ -233,6 +233,26 @@ static void test_clamp_step(void)
 	cpfix_clamp_step(&s, 8170 + 20, 7590, 1000, 1500, 1500, 150);
 	EQ(s.n, 2, "within the 20 mV slack: sampled");
 
+	/*
+	 * P7 v2 revision: a clamped round is still learned when ibus rose by >= 30 mA
+	 * and vbus by >= 10 mV since the last round (the source follows the request).
+	 */
+	cpfix_clamp_reset(&s);
+	cpfix_clamp_step(&s, 8000, 8000, 0, 0, 1500, 150);
+	EQ(cpfix_clamp_step(&s, 8020, 7700, 600, 500, 1500, 150), 683, "learn 533");
+	/* bound 7700 + 600 * 683 / 1000 + 20 = 8129 */
+	cpfix_clamp_step(&s, 8300, 7710, 630, 1000, 1500, 150);
+	EQ(s.n, 2, "clamped, ibus +30 and vbus +10: sampled");
+	EQ(s.r_learned, 533, "minimum kept");
+	cpfix_clamp_step(&s, 8400, 7719, 700, 1500, 1500, 150);
+	EQ(s.n, 2, "clamped, vbus +9: not sampled");
+	cpfix_clamp_step(&s, 8400, 7740, 729, 2000, 1500, 150);
+	EQ(s.n, 2, "clamped, ibus +29: not sampled");
+	cpfix_clamp_step(&s, 8400, 7750, 759, 2500, 1500, 150);
+	EQ(s.n, 3, "clamped, ibus +30 and vbus +10 again: sampled");
+	cpfix_clamp_step(&s, 8400, 7740, 800, 3000, 1500, 150);
+	EQ(s.n, 3, "clamped, vbus fell: not sampled");
+
 	/* window: minimum of the last 8 samples, older ones age out (margin 400 keeps headroom) */
 	cpfix_clamp_reset(&s);
 	EQ(cpfix_clamp_step(&s, 8000, 8000, 0, 0, 1500, 400), 750, "stock + 400");
