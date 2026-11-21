@@ -217,4 +217,12 @@ static inline int cpfix_clamp_step(struct cpfix_clamp_state *s, int req_prev, in
 	return r_eff;
 }
 
+/* STUB (test-first): P7 v3 clamp resistance, stock value until implemented */
+static inline int cpfix_clamp_r(int ibus, int headroom_mv)
+{
+	(void)ibus;
+	(void)headroom_mv;
+	return CPFIX_R_STOCK;
+}
+
 #endif /* CPFIX_POLICY_H */

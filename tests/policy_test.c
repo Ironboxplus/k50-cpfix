@@ -275,6 +275,26 @@ static void test_clamp_step(void)
 	EQ(s.n, 0, "no sample from negative gap");
 }
 
+static void test_clamp_r(void)
+{
+	/* P7 v3: r = 350 + headroom * 1000 / max(ibus, 50), within 350..40000 */
+	EQ(cpfix_clamp_r(1000, 400), 750, "1 A, 400 mV");
+	EQ(cpfix_clamp_r(2400, 400), 516, "2.4 A: 350 + 166");
+	EQ(cpfix_clamp_r(1800, 0), 350, "headroom 0 = stock");
+	EQ(cpfix_clamp_r(0, 400), 8350, "ibus 0 counts as 50 mA");
+	EQ(cpfix_clamp_r(49, 400), 8350, "49 mA counts as 50 mA");
+	EQ(cpfix_clamp_r(-300, 400), 8350, "negative ibus counts as 50 mA");
+	EQ(cpfix_clamp_r(50, 800), 16350, "max headroom at 50 mA");
+	EQ(cpfix_clamp_r(10, 2000), 40000, "capped at 40000");
+	EQ(cpfix_clamp_r(6200, 800), 479, "6.2 A");
+	/* the vendor's 32-bit product ibus * r stays below 2^31 */
+	EQ(6200LL * cpfix_clamp_r(6200, 800) < 2147483648LL, 1, "product at 6.2 A");
+	EQ(50LL * cpfix_clamp_r(50, 800) < 2147483648LL, 1, "product at 50 mA");
+	/* bound = vbus + ibus * r / 1000 lands within a few mV of vbus + 0.35 ibus + headroom */
+	EQ(1000 * cpfix_clamp_r(1000, 400) / 1000, 350 + 400, "bound offset at 1 A");
+	EQ(2400 * cpfix_clamp_r(2400, 400) / 1000, 840 + 398, "bound offset at 2.4 A (floor)");
+}
+
 int main(void)
 {
 	test_param_table();
@@ -286,5 +306,6 @@ int main(void)
 	test_fcc_cap();
 	test_fv();
 	test_clamp_step();
+	test_clamp_r();
 	return check_report();
 }
