@@ -23,8 +23,7 @@
 	X(batt_temp_hi, 420, 300, 460, 0)              \
 	X(batt_temp_lo, 400, 300, 460, 0)              \
 	X(fcc_cap_ma, 0, 500, 12400, 1)                \
-	X(cable_res_mohm, 1000, 350, 1500, 0)          \
-	X(cable_margin_mohm, 150, 50, 400, 0)          \
+	X(clamp_headroom_mv, 400, 0, 800, 0)           \
 	X(fv_drop_max_mv, 0, 0, 100, 0)                \
 	X(fv_ceiling_mv, 4440, 4000, 4440, 0)
 
@@ -33,14 +32,10 @@
 #define CPFIX_FCC_CAP_MIN 500
 #define CPFIX_FCC_CAP_MAX 12400
 
-/* P7 learned tune clamp */
-#define CPFIX_R_STOCK 350		/* vendor MAX_CABLE_RESISTANCE, also the floor (mOhm) */
-#define CPFIX_LEARN_MIN_IBUS 500	/* mA */
-#define CPFIX_CLAMP_IDLE_MS 5000	/* longer gap between hits = TUNE was left */
-#define CPFIX_CLAMP_SLACK_MV 20		/* tune adds final_step x 20 mV on top of the clamp */
-#define CPFIX_LEARN_WINDOW 8
-#define CPFIX_FOLLOW_IBUS_MA 30		/* clamped round still learned when ibus rose this much */
-#define CPFIX_FOLLOW_VBUS_MV 10		/* ... and vbus this much */
+/* P7 tune clamp */
+#define CPFIX_R_STOCK 350		/* vendor MAX_CABLE_RESISTANCE (mOhm) */
+#define CPFIX_CLAMP_MIN_IBUS 50		/* mA, divisor floor */
+#define CPFIX_CLAMP_R_MAX 40000		/* mOhm: 6200 mA x 40000 < 2^31 in the vendor mul */
 
 static inline int cpfix_streq(const char *a, const char *b)
 {
@@ -146,83 +141,17 @@ static inline int cpfix_fv_vote_value(int is_fv, int enabled, int val, int on, i
 }
 
 /*
- * P7 v2: resistance (mOhm) the vendor tune clamp
+ * P7 v3: resistance (mOhm) for the vendor tune clamp
  *   request <= master_cp_vbus + total_ibus * r / 1000
- * should use, learned from the gap between the last request and the
- * measured vbus while the source follows the request.
+ * chosen so that the bound becomes vbus + ibus * 350 / 1000 + headroom_mv:
+ * the stock clamp plus a fixed voltage headroom, independent of the current.
+ * headroom_mv 0 is the stock clamp.
  */
-struct cpfix_clamp_state {
-	int win[CPFIX_LEARN_WINDOW];	/* last qualifying samples, ring */
-	int n, head;
-	int r_learned;
-	int last_r_eff, last_req, last_vbus, last_ibus;
-	unsigned long last_ms;
-	int have_last;
-};
-
-static inline void cpfix_clamp_reset(struct cpfix_clamp_state *s)
-{
-	s->n = 0;
-	s->head = 0;
-	s->r_learned = CPFIX_R_STOCK;
-	s->have_last = 0;
-}
-
-/*
- * One TUNE iteration. req_prev: request sent last round (pdpm+0x28c, before
- * this round's clamp); vbus/ibus: what that request produced. r_max is
- * cable_res_mohm, margin is cable_margin_mohm. Returns r_eff.
- */
-static inline int cpfix_clamp_step(struct cpfix_clamp_state *s, int req_prev, int vbus, int ibus,
-				   unsigned long now_ms, int r_max, int margin)
-{
-	int prev_clamped = 0, follows = 0, r_eff, i, m;
-
-	if (!s->have_last || now_ms - s->last_ms > CPFIX_CLAMP_IDLE_MS)
-		cpfix_clamp_reset(s);
-
-	/*
-	 * Last round's request was cut by the clamp: its gap only says something
-	 * about the cable when vbus and ibus rose with it (the source follows);
-	 * a current-limiting source keeps them flat.
-	 */
-	if (s->have_last) {
-		prev_clamped = req_prev > s->last_vbus +
-				s->last_ibus * s->last_r_eff / 1000 + CPFIX_CLAMP_SLACK_MV;
-		follows = ibus - s->last_ibus >= CPFIX_FOLLOW_IBUS_MA &&
-			  vbus - s->last_vbus >= CPFIX_FOLLOW_VBUS_MV;
-	}
-
-	if (ibus >= CPFIX_LEARN_MIN_IBUS && req_prev > vbus && (!prev_clamped || follows)) {
-		s->win[s->head] = (req_prev - vbus) * 1000 / ibus;
-		s->head = (s->head + 1) % CPFIX_LEARN_WINDOW;
-		if (s->n < CPFIX_LEARN_WINDOW)
-			s->n++;
-		/* minimum: a current-limiting source only makes gap/ibus larger */
-		m = s->win[0];
-		for (i = 1; i < s->n; i++)
-			if (s->win[i] < m)
-				m = s->win[i];
-		s->r_learned = m > CPFIX_R_STOCK ? m : CPFIX_R_STOCK;
-	}
-
-	r_eff = cpfix_clamp(s->r_learned + margin, CPFIX_R_STOCK,
-			    r_max > CPFIX_R_STOCK ? r_max : CPFIX_R_STOCK);
-	s->last_r_eff = r_eff;
-	s->last_req = req_prev;
-	s->last_vbus = vbus;
-	s->last_ibus = ibus;
-	s->last_ms = now_ms;
-	s->have_last = 1;
-	return r_eff;
-}
-
-/* STUB (test-first): P7 v3 clamp resistance, stock value until implemented */
 static inline int cpfix_clamp_r(int ibus, int headroom_mv)
 {
-	(void)ibus;
-	(void)headroom_mv;
-	return CPFIX_R_STOCK;
+	int i = ibus > CPFIX_CLAMP_MIN_IBUS ? ibus : CPFIX_CLAMP_MIN_IBUS;
+
+	return cpfix_clamp(CPFIX_R_STOCK + headroom_mv * 1000 / i, CPFIX_R_STOCK, CPFIX_CLAMP_R_MAX);
 }
 
 #endif /* CPFIX_POLICY_H */

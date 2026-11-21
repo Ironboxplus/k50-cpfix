@@ -16,7 +16,7 @@ static const struct param params[] = {
 
 static void test_param_table(void)
 {
-	/* Ranges and defaults from PLAN §2.3, the P7 addendum and the second revision. */
+	/* Ranges and defaults from PLAN §2.3, P7 v3 and P8. */
 	static const struct param want[] = {
 		{ "enable", 1, 0, 1, 0 },
 		{ "entry_vbat_margin_mv", 90, 0, 250, 0 },
@@ -29,8 +29,7 @@ static void test_param_table(void)
 		{ "batt_temp_hi", 420, 300, 460, 0 },
 		{ "batt_temp_lo", 400, 300, 460, 0 },
 		{ "fcc_cap_ma", 0, 500, 12400, 1 },
-		{ "cable_res_mohm", 1000, 350, 1500, 0 },
-		{ "cable_margin_mohm", 150, 50, 400, 0 },
+		{ "clamp_headroom_mv", 400, 0, 800, 0 },
 		{ "fv_drop_max_mv", 0, 0, 100, 0 },
 		{ "fv_ceiling_mv", 4440, 4000, 4440, 0 },
 	};
@@ -75,14 +74,11 @@ static void test_clamp_boundaries(void)
 	EQ(cpfix_clamp_param(-1, 500, 12400, 1), 0, "fcc_cap -1");
 	EQ(cpfix_clamp_param(1, 500, 12400, 1), 500, "fcc_cap 1");
 	EQ(cpfix_clamp_param(12401, 500, 12400, 1), 12400, "fcc_cap 12401");
-	EQ(cpfix_clamp_param(349, 350, 1500, 0), 350, "cable_res 349");
-	EQ(cpfix_clamp_param(0, 350, 1500, 0), 350, "cable_res 0");
-	EQ(cpfix_clamp_param(1501, 350, 1500, 0), 1500, "cable_res 1501");
 	EQ(cpfix_clamp_param(251, 0, 250, 0), 250, "margin 251");
 	EQ(cpfix_clamp_param(49, 50, 95, 1), 50, "high_soc 49");
 	EQ(cpfix_clamp_param(96, 50, 95, 1), 95, "high_soc 96");
-	EQ(cpfix_clamp_param(49, 50, 400, 0), 50, "cable_margin 49");
-	EQ(cpfix_clamp_param(401, 50, 400, 0), 400, "cable_margin 401");
+	EQ(cpfix_clamp_param(-1, 0, 800, 0), 0, "headroom -1");
+	EQ(cpfix_clamp_param(801, 0, 800, 0), 800, "headroom 801");
 	EQ(cpfix_clamp_param(-1, 0, 100, 0), 0, "fv_drop -1");
 	EQ(cpfix_clamp_param(101, 0, 100, 0), 100, "fv_drop 101");
 	EQ(cpfix_clamp_param(3999, 4000, 4440, 0), 4000, "fv_ceiling 3999");
@@ -191,90 +187,6 @@ static void test_fv(void)
 	EQ(cpfix_fv_vote_value(1, 1, 4450, 0, 4440), 4450, "cpfix off");
 }
 
-static void test_clamp_step(void)
-{
-	struct cpfix_clamp_state s;
-	int r, i;
-
-	/*
-	 * Each request below stays within the previous bound
-	 * (vbus + ibus * r_eff / 1000 + 20) unless a test wants a clamped round.
-	 */
-	cpfix_clamp_reset(&s);
-	/* no sample yet: stock + margin */
-	EQ(cpfix_clamp_step(&s, 8200, 8200, 0, 1000, 1000, 150), 500, "first hit");
-	/* ibus below 500 mA: no learning */
-	EQ(cpfix_clamp_step(&s, 8210, 8150, 400, 1500, 1000, 150), 500, "low ibus");
-	EQ(s.n, 0, "nothing learned below 500 mA");
-	/* gap 430 mV at 1000 mA: 430 mOhm learned, r_eff 580 */
-	EQ(cpfix_clamp_step(&s, 8360, 7930, 1000, 2000, 1000, 150), 580, "learn 430");
-	EQ(s.r_learned, 430, "r_learned");
-	/* a larger sample does not raise the minimum */
-	EQ(cpfix_clamp_step(&s, 8530, 7930, 1000, 2500, 1000, 150), 580, "larger sample");
-	EQ(s.n, 2, "two samples");
-
-	/* below stock: floor at 350 */
-	cpfix_clamp_reset(&s);
-	cpfix_clamp_step(&s, 8000, 8000, 0, 0, 1000, 150);
-	EQ(cpfix_clamp_step(&s, 8020, 7890, 1000, 500, 1000, 150), 500, "130 mOhm floors at stock");
-	/* hard upper bound cable_res_mohm */
-	EQ(cpfix_clamp_step(&s, 8130, 8000, 1000, 1000, 400, 150), 400, "capped by cable_res");
-	/* r_max at stock returns stock */
-	EQ(cpfix_clamp_step(&s, 8130, 8000, 1000, 1500, 350, 400), 350, "cap at stock");
-
-	/* a clamped round is not learned: last bound 7590 + 1000 * 580 / 1000 = 8170 */
-	cpfix_clamp_reset(&s);
-	cpfix_clamp_step(&s, 8000, 8000, 0, 0, 1500, 150);
-	cpfix_clamp_step(&s, 8020, 7590, 1000, 500, 1500, 150);	/* learns 430 -> 580 */
-	EQ(s.n, 1, "one sample");
-	r = cpfix_clamp_step(&s, 8170 + 21, 7590, 1000, 1000, 1500, 150);
-	EQ(s.n, 1, "request over last bound + 20: not sampled");
-	EQ(r, 580, "r_eff unchanged");
-	cpfix_clamp_step(&s, 8170 + 20, 7590, 1000, 1500, 1500, 150);
-	EQ(s.n, 2, "within the 20 mV slack: sampled");
-
-	/*
-	 * P7 v2 revision: a clamped round is still learned when ibus rose by >= 30 mA
-	 * and vbus by >= 10 mV since the last round (the source follows the request).
-	 */
-	cpfix_clamp_reset(&s);
-	cpfix_clamp_step(&s, 8000, 8000, 0, 0, 1500, 150);
-	EQ(cpfix_clamp_step(&s, 8020, 7700, 600, 500, 1500, 150), 683, "learn 533");
-	/* bound 7700 + 600 * 683 / 1000 + 20 = 8129 */
-	cpfix_clamp_step(&s, 8300, 7710, 630, 1000, 1500, 150);
-	EQ(s.n, 2, "clamped, ibus +30 and vbus +10: sampled");
-	EQ(s.r_learned, 533, "minimum kept");
-	cpfix_clamp_step(&s, 8400, 7719, 700, 1500, 1500, 150);
-	EQ(s.n, 2, "clamped, vbus +9: not sampled");
-	cpfix_clamp_step(&s, 8400, 7740, 729, 2000, 1500, 150);
-	EQ(s.n, 2, "clamped, ibus +29: not sampled");
-	cpfix_clamp_step(&s, 8400, 7750, 759, 2500, 1500, 150);
-	EQ(s.n, 3, "clamped, ibus +30 and vbus +10 again: sampled");
-	cpfix_clamp_step(&s, 8400, 7740, 800, 3000, 1500, 150);
-	EQ(s.n, 3, "clamped, vbus fell: not sampled");
-
-	/* window: minimum of the last 8 samples, older ones age out (margin 400 keeps headroom) */
-	cpfix_clamp_reset(&s);
-	EQ(cpfix_clamp_step(&s, 8000, 8000, 0, 0, 1500, 400), 750, "stock + 400");
-	cpfix_clamp_step(&s, 8020, 7620, 1000, 100, 1500, 400);	/* 400 */
-	EQ(s.r_learned, 400, "first sample 400");
-	for (i = 0; i < 7; i++)
-		cpfix_clamp_step(&s, 8040, 7440, 1000, 200 + 100 * i, 1500, 400);	/* 600 */
-	EQ(s.n, 8, "window full");
-	EQ(s.r_learned, 400, "400 still in the window");
-	cpfix_clamp_step(&s, 8040, 7440, 1000, 1000, 1500, 400);
-	EQ(s.n, 8, "window stays at 8");
-	EQ(s.r_learned, 600, "400 aged out");
-
-	/* leaving TUNE: more than 5000 ms since the last hit resets the learning */
-	EQ(cpfix_clamp_step(&s, 8000, 8000, 0, 1000 + 5000, 1500, 400), 1000, "5000 ms: kept");
-	EQ(cpfix_clamp_step(&s, 8000, 8000, 0, 6000 + 5001, 1500, 400), 750, "5001 ms: reset");
-	EQ(s.n, 0, "samples cleared");
-	/* request not above vbus: nothing to learn */
-	EQ(cpfix_clamp_step(&s, 8000, 8100, 1000, 11500, 1500, 400), 750, "negative gap");
-	EQ(s.n, 0, "no sample from negative gap");
-}
-
 static void test_clamp_r(void)
 {
 	/* P7 v3: r = 350 + headroom * 1000 / max(ibus, 50), within 350..40000 */
@@ -305,7 +217,6 @@ int main(void)
 	test_vote_rewrite();
 	test_fcc_cap();
 	test_fv();
-	test_clamp_step();
 	test_clamp_r();
 	return check_report();
 }

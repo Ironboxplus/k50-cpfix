@@ -68,13 +68,13 @@ class ParseTest {
             # comment
             enable=1
             fcc_cap_ma=3000
-            cable_res_mohm = 900
+            clamp_headroom_mv = 600
             unknown=5
             fast_ramp=yes
             taper_reduce_ma=-1
             entry_high_soc=
         """.trimIndent()
-        assertEquals(mapOf("enable" to 1, "fcc_cap_ma" to 3000, "cable_res_mohm" to 900), parseConf(text))
+        assertEquals(mapOf("enable" to 1, "fcc_cap_ma" to 3000, "clamp_headroom_mv" to 600), parseConf(text))
     }
 
     @Test

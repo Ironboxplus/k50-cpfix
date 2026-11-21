@@ -208,23 +208,26 @@ static int cpfix_pre_p6(struct kprobe *p, struct pt_regs *regs)
 
 /*
  * P7 pdm_main_sm `mul w8,w8,w11`: resistance of the tune clamp, stock 350 mOhm,
- * learned from the cable (cpfix_clamp_step). Here w8 = total_ibus, w10 =
- * master_cp_vbus, pdpm+0x28c = last request. Only this handler touches the
- * state: pdm_main_sm runs from a single work item.
+ * chosen so the bound is vbus + ibus * 350 / 1000 + clamp_headroom_mv
+ * (cpfix_clamp_r). Here w8 = total_ibus, w10 = master_cp_vbus,
+ * pdpm+0x28c = last request. The last_* values are for display only.
  */
-static struct cpfix_clamp_state cpfix_clamp_st;
+static int cpfix_last_vbus, cpfix_last_ibus, cpfix_last_req, cpfix_last_bound;
 
 static int cpfix_pre_p7(struct kprobe *p, struct pt_regs *regs)
 {
-	int req_prev, r;
+	int vbus, ibus, r;
 
 	if (!cpfix_on(p))
 		return 0;
-	req_prev = READ_ONCE(*(int *)(regs->regs[19] + PDPM_REQUEST_VOLTAGE));
-	r = cpfix_clamp_step(&cpfix_clamp_st, req_prev, (int)regs->regs[10], (int)regs->regs[8],
-			     jiffies_to_msecs(jiffies), READ_ONCE(cp_cable_res_mohm),
-			     READ_ONCE(cp_cable_margin_mohm));
+	ibus = (int)regs->regs[8];
+	vbus = (int)regs->regs[10];
+	r = cpfix_clamp_r(ibus, READ_ONCE(cp_clamp_headroom_mv));
 	set_w(regs, 11, r);
+	WRITE_ONCE(cpfix_last_vbus, vbus);
+	WRITE_ONCE(cpfix_last_ibus, ibus);
+	WRITE_ONCE(cpfix_last_req, READ_ONCE(*(int *)(regs->regs[19] + PDPM_REQUEST_VOLTAGE)));
+	WRITE_ONCE(cpfix_last_bound, vbus + ibus * r / 1000);
 	return 0;
 }
 
@@ -379,14 +382,12 @@ static ssize_t fcc_effective_show(struct kobject *kobj, struct kobj_attribute *a
 	return scnprintf(buf, PAGE_SIZE, "%d\n", get_effective_result(cpfix_fcc));
 }
 
-/* learned tune clamp: r_learned r_eff samples last_vbus last_ibus last_req (mOhm, mV, mA) */
+/* last tune clamp: last_vbus last_ibus last_req last_bound (mV, mA, mV, mV) */
 static ssize_t clamp_show(struct kobject *kobj, struct kobj_attribute *attr, char *buf)
 {
-	const struct cpfix_clamp_state *s = &cpfix_clamp_st;
-
-	return scnprintf(buf, PAGE_SIZE, "%d %d %d %d %d %d\n", READ_ONCE(s->r_learned),
-			 READ_ONCE(s->last_r_eff), READ_ONCE(s->n), READ_ONCE(s->last_vbus),
-			 READ_ONCE(s->last_ibus), READ_ONCE(s->last_req));
+	return scnprintf(buf, PAGE_SIZE, "%d %d %d %d\n", READ_ONCE(cpfix_last_vbus),
+			 READ_ONCE(cpfix_last_ibus), READ_ONCE(cpfix_last_req),
+			 READ_ONCE(cpfix_last_bound));
 }
 
 static ssize_t fv_effective_show(struct kobject *kobj, struct kobj_attribute *attr, char *buf)
@@ -440,7 +441,6 @@ static int __init cpfix_init(void)
 		pr_err("votable CHARGER_FV not found\n");
 		return -ENODEV;
 	}
-	cpfix_clamp_reset(&cpfix_clamp_st);
 
 	ret = cpfix_register_all();
 	if (ret)

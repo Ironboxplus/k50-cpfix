@@ -61,15 +61,11 @@ static int noise(int amp)
 struct strategy {
 	const char *name;
 	int static_r;	/* 0: the module's clamp */
-	struct cpfix_clamp_state st;
 };
 
-static int strategy_r(struct strategy *s, int req, int vbus, int ibus, unsigned long t)
+static int strategy_r(const struct strategy *s, int ibus)
 {
-	if (s->static_r)
-		return s->static_r;
-	/* module clamp as of e2d0db3 (learned, cable_res 1000, margin 150) */
-	return cpfix_clamp_step(&s->st, req, vbus, ibus, t, 1000, 150);
+	return s->static_r ? s->static_r : cpfix_clamp_r(ibus, HEADROOM);
 }
 
 struct run {
@@ -80,14 +76,13 @@ struct run {
 	int max_excess;		/* max(req - vbus - ibus * r_true / 1000), measured values */
 };
 
-static void run_init(struct run *r, struct strategy *s)
+static void run_init(struct run *r)
 {
 	r->req = 2 * VBAT + 200;	/* entry request */
 	r->t = 1000;
 	r->max_ibus = r->reached = r->cuts_after = 0;
 	r->min_ibus_after = 1 << 30;
 	r->max_excess = -(1 << 30);
-	cpfix_clamp_reset(&s->st);
 }
 
 /* One TUNE iteration; returns the true values of this round. */
@@ -101,7 +96,7 @@ static struct sample round_once(struct run *r, struct strategy *s, const struct 
 		ibus += noise(30);
 		vbus += noise(10);
 	}
-	rr = strategy_r(s, r->req, vbus, ibus, r->t);
+	rr = strategy_r(s, ibus);
 	bound = vbus + ibus * rr / 1000;	/* 32-bit, as the vendor's mul + smull */
 	if (r->req > bound) {
 		r->req = bound;
@@ -134,7 +129,7 @@ static int follow_ok(struct strategy *s, int r_path, int verbose)
 	struct run r;
 	int i, ok;
 
-	run_init(&r, s);
+	run_init(&r);
 	for (i = 0; i < 80; i++)
 		round_once(&r, s, &src, 1800);
 	ok = r.max_ibus >= 1800 && r.min_ibus_after >= 1700;
@@ -157,7 +152,7 @@ static void limited(struct strategy *s, int *excess, int *jump, int verbose)
 	struct sample before, after;
 	int i;
 
-	run_init(&r, s);
+	run_init(&r);
 	for (i = 0; i < 60; i++)
 		round_once(&r, s, &src, 3000);
 	*excess = r.max_excess;
@@ -179,7 +174,7 @@ static int noisy(struct strategy *s, unsigned int seed)
 	int i;
 
 	rng = seed ? seed : 1;
-	run_init(&r, s);
+	run_init(&r);
 	for (i = 0; i < 300; i++)
 		round_once(&r, s, &src, 3000);
 	return r.max_excess;

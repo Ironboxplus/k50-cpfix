@@ -7,7 +7,7 @@ CONF=$DATA/cpfix.conf
 LOG=$DATA/cpfix.log
 OLD_FLAG=/data/adb/charge_unthrottle.disable
 # keys accepted from cpfix.conf: the module parameters, nothing else
-KEYS="enable entry_vbat_margin_mv entry_high_soc fast_ramp taper_reduce_ma ffc_any_pps thermal_override thermal_override_ma batt_temp_hi batt_temp_lo fcc_cap_ma cable_res_mohm cable_margin_mohm fv_drop_max_mv fv_ceiling_mv"
+KEYS="enable entry_vbat_margin_mv entry_high_soc fast_ramp taper_reduce_ma ffc_any_pps thermal_override thermal_override_ma batt_temp_hi batt_temp_lo fcc_cap_ma clamp_headroom_mv fv_drop_max_mv fv_ceiling_mv"
 
 [ -f "$MODDIR/disable" ] && exit 0
 [ -f "$MODDIR/remove" ] && exit 0
