@@ -39,6 +39,8 @@
 #define CPFIX_CLAMP_IDLE_MS 5000	/* longer gap between hits = TUNE was left */
 #define CPFIX_CLAMP_SLACK_MV 20		/* tune adds final_step x 20 mV on top of the clamp */
 #define CPFIX_LEARN_WINDOW 8
+#define CPFIX_FOLLOW_IBUS_MA 30		/* clamped round still learned when ibus rose this much */
+#define CPFIX_FOLLOW_VBUS_MV 10		/* ... and vbus this much */
 
 static inline int cpfix_streq(const char *a, const char *b)
 {
@@ -174,17 +176,24 @@ static inline void cpfix_clamp_reset(struct cpfix_clamp_state *s)
 static inline int cpfix_clamp_step(struct cpfix_clamp_state *s, int req_prev, int vbus, int ibus,
 				   unsigned long now_ms, int r_max, int margin)
 {
-	int prev_clamped = 0, r_eff, i, m;
+	int prev_clamped = 0, follows = 0, r_eff, i, m;
 
 	if (!s->have_last || now_ms - s->last_ms > CPFIX_CLAMP_IDLE_MS)
 		cpfix_clamp_reset(s);
 
-	/* last round's request was cut by the clamp: its gap says nothing about the cable */
-	if (s->have_last)
+	/*
+	 * Last round's request was cut by the clamp: its gap only says something
+	 * about the cable when vbus and ibus rose with it (the source follows);
+	 * a current-limiting source keeps them flat.
+	 */
+	if (s->have_last) {
 		prev_clamped = req_prev > s->last_vbus +
 				s->last_ibus * s->last_r_eff / 1000 + CPFIX_CLAMP_SLACK_MV;
+		follows = ibus - s->last_ibus >= CPFIX_FOLLOW_IBUS_MA &&
+			  vbus - s->last_vbus >= CPFIX_FOLLOW_VBUS_MV;
+	}
 
-	if (!prev_clamped && ibus >= CPFIX_LEARN_MIN_IBUS && req_prev > vbus) {
+	if (ibus >= CPFIX_LEARN_MIN_IBUS && req_prev > vbus && (!prev_clamped || follows)) {
 		s->win[s->head] = (req_prev - vbus) * 1000 / ibus;
 		s->head = (s->head + 1) % CPFIX_LEARN_WINDOW;
 		if (s->n < CPFIX_LEARN_WINDOW)
