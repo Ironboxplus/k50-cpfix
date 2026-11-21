@@ -1,0 +1,18 @@
+/* SPDX-License-Identifier: GPL-2.0 */
+/*
+ * Patch points, the single source shared by cpfix.c and tools/verify_patchpoints.py.
+ *
+ * PP(id, module, symbol, offset, expected_insn, handler)
+ *   offset         byte offset from the symbol start in the running vendor module
+ *   expected_insn  little-endian instruction word at symbol+offset in
+ *                  tests/fixtures/vendor/<module>.ko; the word carries no relocation
+ *
+ * Keep one record per line: the test script parses this file line by line.
+ * P3 is reserved for the +-1 step damping that stays untouched.
+ */
+PP(P1, "pd_cp_manager", "pdm_check_condition", 0x94, 0xb9424e68, cpfix_pre_p1)
+PP(P2, "pd_cp_manager", "pdm_main_sm", 0x11f8, 0x710c7d3f, cpfix_pre_p2)
+PP(P4, "pd_cp_manager", "pdm_taper_reduce_current", 0x5c, 0x2a0003f5, cpfix_pre_p4)
+PP(P5, "mtk_charger_framework", "charge_monitor_func", 0xd50, 0x340000ca, cpfix_pre_p5)
+PP(P6, "mtk_charger_framework", "vote", 0x0, 0xd503233f, cpfix_pre_p6)
+PP(P7, "pd_cp_manager", "pdm_main_sm", 0xcb0, 0x1b0b7d08, cpfix_pre_p7)

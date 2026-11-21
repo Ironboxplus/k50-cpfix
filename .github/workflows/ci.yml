@@ -1,0 +1,292 @@
+name: ci
+
+on:
+  push:
+    branches: [dev, main]
+    paths:
+      - "kernel/**"
+      - "device/**"
+      - "tests/**"
+      - "tools/**"
+      - "ksu/**"
+      - "app/**"
+      - ".github/workflows/**"
+  workflow_dispatch:
+    inputs:
+      jobs:
+        description: "Jobs to run: all, or a comma list of kernel-build,kernel-tests,scripts,app,package"
+        required: false
+        default: all
+
+# One group per commit: a new push runs beside the previous run instead of cancelling it.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}-${{ github.sha }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  DDK_IMAGE: ghcr.io/ylarod/ddk-min:android12-5.10-20260828
+
+jobs:
+  select:
+    name: select jobs
+    runs-on: ubuntu-latest
+    outputs:
+      kernel-build: ${{ steps.pick.outputs.kernel-build }}
+      kernel-tests: ${{ steps.pick.outputs.kernel-tests }}
+      scripts: ${{ steps.pick.outputs.scripts }}
+      app: ${{ steps.pick.outputs.app }}
+      package: ${{ steps.pick.outputs.package }}
+      version: ${{ steps.pick.outputs.version }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - id: pick
+        env:
+          EVENT: ${{ github.event_name }}
+          INPUT_JOBS: ${{ inputs.jobs }}
+          BEFORE: ${{ github.event.before }}
+          MESSAGE: ${{ github.event.head_commit.message }}
+        run: |
+          set -eu
+          # Selection order: workflow_dispatch input; "[jobs: a,b]" in the head commit message;
+          # otherwise the paths the push changed.
+          sel=""
+          if [ "$EVENT" = workflow_dispatch ]; then
+            sel="${INPUT_JOBS:-all}"
+          else
+            tag=$(printf '%s\n' "$MESSAGE" | sed -n 's/.*\[jobs: *\([a-z,-]*\)\].*/\1/p' | head -n1)
+            if [ -n "$tag" ]; then
+              sel="$tag"
+            elif [ -z "$BEFORE" ] || ! git cat-file -e "$BEFORE^{commit}" 2>/dev/null; then
+              sel=all
+            else
+              changed=$(git diff --name-only "$BEFORE" "$GITHUB_SHA")
+              echo "changed:"; echo "$changed"
+              has() { printf '%s\n' "$changed" | grep -qE "$1"; }
+              has '^\.github/workflows/' && sel=all
+              has '^(kernel|device)/' && sel="$sel,kernel-tests,app"
+              has '^(tests|tools)/' && sel="$sel,kernel-tests"
+              has '^ksu/' && sel="$sel,scripts"
+              has '^app/' && sel="$sel,app"
+            fi
+          fi
+          case ",$sel," in *,all,*) sel="kernel-build,kernel-tests,scripts,app,package" ;; esac
+          # a job pulls in the jobs it needs
+          case ",$sel," in *,package,*) sel="$sel,kernel-build,kernel-tests,scripts,app" ;; esac
+          case ",$sel," in *,kernel-tests,*) sel="$sel,kernel-build" ;; esac
+          for j in kernel-build kernel-tests scripts app package; do
+            case ",$sel," in *,$j,*) v=true ;; *) v=false ;; esac
+            echo "$j=$v" >> "$GITHUB_OUTPUT"
+            echo "$j=$v"
+          done
+          n=$(git rev-list --count HEAD)
+          echo "version=0.1.$n-$(git rev-parse --short=12 HEAD)" >> "$GITHUB_OUTPUT"
+
+  kernel-build:
+    needs: select
+    if: needs.select.outputs.kernel-build == 'true'
+    runs-on: ubuntu-latest
+    container:
+      image: ghcr.io/ylarod/ddk-min:android12-5.10-20260828
+    steps:
+      - uses: actions/checkout@v7
+      - name: Build cpfix.ko
+        env:
+          CPFIX_VERSION: ${{ needs.select.outputs.version }}
+        run: |
+          set -eu
+          echo "KDIR=$KDIR"
+          mkdir -p out
+          # keep the DDK's own table for the informational CRC comparison in kernel-tests
+          if [ -f "$KDIR/Module.symvers" ]; then cp "$KDIR/Module.symvers" out/ddk-native.symvers; fi
+          make -C kernel CPFIX_VERSION="$CPFIX_VERSION"
+          cp kernel/cpfix.ko out/
+          ls -l out/
+      - name: modinfo (license, depends, vermagic)
+        run: |
+          set -eu
+          llvm-readelf -p .modinfo out/cpfix.ko | tee out/modinfo.txt
+          grep -q 'license=GPL$' out/modinfo.txt || { echo "license is not GPL"; exit 1; }
+          grep -qE 'depends=(.*,)?mtk_charger_framework(,.*)?$' out/modinfo.txt || { echo "depends lacks mtk_charger_framework"; exit 1; }
+          grep -q 'vermagic=.* SMP preempt mod_unload modversions aarch64' out/modinfo.txt
+      - uses: actions/upload-artifact@v7
+        with:
+          name: cpfix-ko
+          path: out/
+          retention-days: 2
+
+  kernel-tests:
+    needs: [select, kernel-build]
+    # the policy and patch-point tests do not need the build; the CRC steps do
+    if: ${{ !cancelled() && needs.select.outputs.kernel-tests == 'true' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.13"
+      - run: pip install pyelftools==0.32
+      - uses: actions/download-artifact@v8
+        if: needs.kernel-build.result == 'success'
+        with:
+          name: cpfix-ko
+          path: out
+      - name: Policy unit test (host gcc)
+        run: |
+          mkdir -p out
+          gcc -std=c11 -Wall -Wextra -Werror -I kernel -o out/policy_test tests/policy_test.c
+          ./out/policy_test
+      - name: Patch points against the vendor fixtures
+        if: ${{ !cancelled() }}
+        run: python tools/verify_patchpoints.py
+      - name: "expect-fail: patch points with every offset +4"
+        if: ${{ !cancelled() }}
+        run: python tools/verify_patchpoints.py --bias 4 --expect-all-fail
+      - name: CRC check of cpfix.ko against the running kernel
+        if: ${{ !cancelled() && needs.kernel-build.result == 'success' }}
+        run: python tools/check_modversions.py out/cpfix.ko device/vmlinux-12292661.symvers device/mtk_charger_framework.symvers
+      - name: "positive control: vendor pd_cp_manager.ko against the same tables"
+        if: ${{ !cancelled() }}
+        run: python tools/check_modversions.py --allow-missing tests/fixtures/vendor/pd_cp_manager.ko device/vmlinux-12292661.symvers device/mtk_charger_framework.symvers
+      - name: "expect-fail: CRC check with register_kprobe's CRC altered"
+        if: ${{ !cancelled() && needs.kernel-build.result == 'success' }}
+        run: |
+          set -u
+          sed 's/^0x[0-9a-f]*\tregister_kprobe\t/0xdeadbeef\tregister_kprobe\t/' device/vmlinux-12292661.symvers > out/tampered.symvers
+          if cmp -s out/tampered.symvers device/vmlinux-12292661.symvers; then echo "tampering did not change the table"; exit 1; fi
+          if python tools/check_modversions.py out/cpfix.ko out/tampered.symvers device/mtk_charger_framework.symvers; then
+            echo "expected a CRC mismatch"; exit 1
+          fi
+          echo "negative control: mismatch detected as expected"
+      - name: "info: cpfix.ko against the DDK's own Module.symvers"
+        if: ${{ !cancelled() && hashFiles('out/ddk-native.symvers') != '' }}
+        continue-on-error: true
+        run: python tools/check_modversions.py out/cpfix.ko out/ddk-native.symvers device/mtk_charger_framework.symvers
+
+  scripts:
+    needs: select
+    if: needs.select.outputs.scripts == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: shellcheck -s sh
+        run: |
+          shellcheck --version
+          shellcheck -s sh ksu/*.sh
+      - name: "expect-fail: shellcheck catches an unquoted expansion"
+        run: |
+          printf '#!/system/bin/sh\nf=$1\nrm $f\n' > /tmp/bad.sh
+          if shellcheck -s sh /tmp/bad.sh; then echo "shellcheck accepted a bad script"; exit 1; fi
+          echo "negative control: rejected as expected"
+
+  app:
+    needs: select
+    if: needs.select.outputs.app == 'true'
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: app
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: "21"
+      - uses: gradle/actions/setup-gradle@v6
+      - name: Keystore
+        env:
+          SIGNING_KEYSTORE_B64: ${{ secrets.SIGNING_KEYSTORE_B64 }}
+        run: |
+          if [ -n "$SIGNING_KEYSTORE_B64" ]; then
+            printf '%s' "$SIGNING_KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/release.jks"
+            echo "SIGNING_KEYSTORE=$RUNNER_TEMP/release.jks" >> "$GITHUB_ENV"
+          else
+            echo "no signing secrets: release stays unsigned"
+          fi
+      - name: Unit tests and release build
+        env:
+          SIGNING_STORE_PASSWORD: ${{ secrets.SIGNING_STORE_PASSWORD }}
+          SIGNING_KEY_ALIAS: ${{ secrets.SIGNING_KEY_ALIAS }}
+          VERSION_NAME: ${{ needs.select.outputs.version }}
+        run: |
+          export VERSION_CODE=$(git rev-list --count HEAD)
+          ./gradlew --no-daemon testDebugUnitTest assembleRelease
+      - name: Test counts
+        if: always()
+        run: |
+          python3 - <<'EOF'
+          import glob, xml.etree.ElementTree as ET
+          t = f = e = s = 0
+          for p in glob.glob("build/test-results/testDebugUnitTest/*.xml"):
+              r = ET.parse(p).getroot()
+              t += int(r.get("tests")); f += int(r.get("failures")); e += int(r.get("errors")); s += int(r.get("skipped"))
+              for c in r.iter("testcase"):
+                  bad = c.find("failure")
+                  if bad is None:
+                      bad = c.find("error")
+                  print(("FAIL " if bad is not None else "ok   ") + c.get("classname") + "." + c.get("name"))
+                  if bad is not None and bad.get("message"):
+                      print("     " + bad.get("message").splitlines()[0][:300])
+          print(f"passed {t - f - e - s} failed {f + e} total {t}")
+          EOF
+      - name: Signature
+        run: |
+          apk=$(ls build/outputs/apk/release/*.apk | head -n1)
+          echo "$apk"
+          "$ANDROID_HOME"/build-tools/$(ls "$ANDROID_HOME/build-tools" | sort -V | tail -n1)/apksigner verify --print-certs "$apk" | grep -E 'Signer #1 certificate (DN|SHA-256)'
+      - uses: actions/upload-artifact@v7
+        with:
+          name: app-release
+          path: app/build/outputs/apk/release/*.apk
+          retention-days: 2
+      - uses: actions/upload-artifact@v7
+        if: failure()
+        with:
+          name: app-test-reports
+          path: app/build/reports/tests/
+          retention-days: 2
+
+  package:
+    needs: [select, kernel-build, kernel-tests, scripts, app]
+    if: needs.select.outputs.package == 'true'
+    runs-on: ubuntu-latest
+    env:
+      VERSION: ${{ needs.select.outputs.version }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: actions/download-artifact@v8
+        with:
+          name: cpfix-ko
+          path: ko
+      - uses: actions/download-artifact@v8
+        with:
+          name: app-release
+          path: apk
+      - name: Module zip, apk and sha256 list
+        run: |
+          set -eu
+          sha=$(git rev-parse --short=12 HEAD)
+          code=$(git rev-list --count HEAD)
+          mkdir -p stage dist
+          cp ksu/customize.sh ksu/service.sh ksu/uninstall.sh ksu/action.sh stage/
+          sed -e "s/@VERSION@/$VERSION/" -e "s/@VERSION_CODE@/$code/" ksu/module.prop > stage/module.prop
+          cp ko/cpfix.ko stage/
+          cp LICENSE stage/ 2>/dev/null || true
+          cat stage/module.prop
+          (cd stage && zip -9 -r "../dist/k50_cpfix-$sha.zip" .)
+          cp "$(ls apk/*.apk | head -n1)" "dist/cpfix-$sha.apk"
+          (cd dist && sha256sum ./*.zip ./*.apk | sed 's# \./# #' > "SHA256SUMS-$sha.txt" && cat "SHA256SUMS-$sha.txt")
+          echo "SHA=$sha" >> "$GITHUB_ENV"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: k50_cpfix-${{ env.SHA }}
+          path: dist/
+          retention-days: 2

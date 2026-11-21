@@ -1,0 +1,6 @@
+id=k50_cpfix
+name=K50 cpfix
+version=@VERSION@
+versionCode=@VERSION_CODE@
+author=ironbox
+description=Redmi K50 charge-pump throttle fix (cpfix.ko, kprobes on vendor modules); not loaded yet

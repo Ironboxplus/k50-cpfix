@@ -1,0 +1,3 @@
+# SPDX-License-Identifier: GPL-2.0
+obj-m := cpfix.o
+ccflags-y += -Werror -DCPFIX_VERSION='"$(CPFIX_VERSION)"'
