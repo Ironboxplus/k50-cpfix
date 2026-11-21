@@ -255,7 +255,9 @@ jobs:
         run: |
           apk=$(ls build/outputs/apk/release/*.apk | head -n1)
           echo "$apk"
-          "$ANDROID_HOME"/build-tools/$(ls "$ANDROID_HOME/build-tools" | sort -V | tail -n1)/apksigner verify --print-certs "$apk" | grep -E 'Signer #1 certificate (DN|SHA-256)'
+          signer=$(find "$ANDROID_HOME/build-tools" -name apksigner -type f | sort -V | tail -n1)
+          echo "$signer"
+          "$signer" verify --verbose --print-certs "$apk"
       - uses: actions/upload-artifact@v7
         with:
           name: app-release
