@@ -1,0 +1,3 @@
+*.ko binary
+*.jks binary
+*.sh text eol=lf

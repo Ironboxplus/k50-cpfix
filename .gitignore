@@ -1,0 +1,13 @@
+*.o
+*.mod
+*.mod.c
+*.cmd
+.*.cmd
+modules.order
+Module.symvers
+/out/
+.gradle/
+build/
+local.properties
+*.jks
+*.keystore

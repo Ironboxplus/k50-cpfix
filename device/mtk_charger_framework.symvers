@@ -1,0 +1,4 @@
+0xb31e0c2b	vote	mtk_charger_framework	EXPORT_SYMBOL_GPL
+0x1aaaeb07	find_votable	mtk_charger_framework	EXPORT_SYMBOL_GPL
+0x56c795e2	get_effective_result	mtk_charger_framework	EXPORT_SYMBOL_GPL
+0x3c167b65	get_client_vote	mtk_charger_framework	EXPORT_SYMBOL_GPL
