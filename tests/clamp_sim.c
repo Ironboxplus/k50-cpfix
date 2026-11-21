@@ -208,8 +208,8 @@ int main(void)
 	LE(jump, 600, "D: recovery jump of the learned clamp <= 0.6 V");
 
 	ok = noisy(&learned, 12345, &max_r, &excess);
-	printf("info noisy learned seed 12345: max r_eff=%d (limit %d), max excess=%d (limit 120)\n",
-	       max_r, 430 + MARGIN + 50, excess);
+	printf("info noisy learned seed 12345: %s, max r_eff=%d (limit %d), max excess=%d (limit 120)\n",
+	       ok ? "ok" : "fails", max_r, 430 + MARGIN + 50, excess);
 	LE(max_r, 430 + MARGIN + 50, "F: r_eff <= r_true + margin + 50 under noise");
 	LE(excess, 120, "F: request excess within the C bound under noise");
 
