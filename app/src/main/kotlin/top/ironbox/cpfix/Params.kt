@@ -56,8 +56,14 @@ object Params {
             unit = "°C", step = 10, scale = 10),
         Param("fcc_cap_ma", 0, 500, 12400, true, "手动充电电流上限", "原厂无此项",
             unit = "mA", step = 100, zeroLabel = "不限制"),
-        Param("cable_res_mohm", 1000, 350, 1500, false, "线阻补偿", "原厂 350 mΩ",
+        Param("cable_res_mohm", 1000, 350, 1500, false, "线阻补偿上限", "原厂固定 350 mΩ；现按学习值自动调整，此项为硬上限",
             unit = "mΩ", step = 50),
+        Param("cable_margin_mohm", 150, 50, 400, false, "线阻学习余量", "原厂无此项（学习值之上再加的余量）",
+            unit = "mΩ", step = 10),
+        Param("fv_drop_max_mv", 0, 0, 100, false, "循环次数降压上限", "原厂按循环次数降 100 mV（4.44 → 4.34 V）",
+            unit = "mV", step = 10),
+        Param("fv_ceiling_mv", 4440, 4000, 4440, false, "充电电压硬上限", "原厂 DT fv / fv_ffc 4440 mV，不允许更高",
+            unit = "mV", step = 10),
     )
 
     val byName: Map<String, Param> = all.associateBy { it.name }

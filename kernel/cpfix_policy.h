@@ -132,15 +132,15 @@ static inline int cpfix_cap_decide(int enable, int cap_ma, int applied, int *en,
  */
 static inline int cpfix_fv_drop(int orig, int drop_max)
 {
-	(void)drop_max;
-	return orig;	/* STUB: stock behaviour */
+	return orig < drop_max ? orig : drop_max;
 }
 
 /* P6 on CHARGER_FV: no enabled voltage vote above ceiling_mv. */
 static inline int cpfix_fv_vote_value(int is_fv, int enabled, int val, int on, int ceiling_mv)
 {
-	(void)is_fv; (void)enabled; (void)on; (void)ceiling_mv;
-	return val;	/* STUB: stock behaviour */
+	if (!is_fv || !enabled || !on)
+		return val;
+	return val < ceiling_mv ? val : ceiling_mv;
 }
 
 /*
@@ -174,9 +174,38 @@ static inline void cpfix_clamp_reset(struct cpfix_clamp_state *s)
 static inline int cpfix_clamp_step(struct cpfix_clamp_state *s, int req_prev, int vbus, int ibus,
 				   unsigned long now_ms, int r_max, int margin)
 {
-	/* STUB: round-1 static clamp, r = cable_res_mohm */
-	(void)s; (void)req_prev; (void)vbus; (void)ibus; (void)now_ms; (void)margin;
-	return r_max;
+	int prev_clamped = 0, r_eff, i, m;
+
+	if (!s->have_last || now_ms - s->last_ms > CPFIX_CLAMP_IDLE_MS)
+		cpfix_clamp_reset(s);
+
+	/* last round's request was cut by the clamp: its gap says nothing about the cable */
+	if (s->have_last)
+		prev_clamped = req_prev > s->last_vbus +
+				s->last_ibus * s->last_r_eff / 1000 + CPFIX_CLAMP_SLACK_MV;
+
+	if (!prev_clamped && ibus >= CPFIX_LEARN_MIN_IBUS && req_prev > vbus) {
+		s->win[s->head] = (req_prev - vbus) * 1000 / ibus;
+		s->head = (s->head + 1) % CPFIX_LEARN_WINDOW;
+		if (s->n < CPFIX_LEARN_WINDOW)
+			s->n++;
+		/* minimum: a current-limiting source only makes gap/ibus larger */
+		m = s->win[0];
+		for (i = 1; i < s->n; i++)
+			if (s->win[i] < m)
+				m = s->win[i];
+		s->r_learned = m > CPFIX_R_STOCK ? m : CPFIX_R_STOCK;
+	}
+
+	r_eff = cpfix_clamp(s->r_learned + margin, CPFIX_R_STOCK,
+			    r_max > CPFIX_R_STOCK ? r_max : CPFIX_R_STOCK);
+	s->last_r_eff = r_eff;
+	s->last_req = req_prev;
+	s->last_vbus = vbus;
+	s->last_ibus = ibus;
+	s->last_ms = now_ms;
+	s->have_last = 1;
+	return r_eff;
 }
 
 #endif /* CPFIX_POLICY_H */
