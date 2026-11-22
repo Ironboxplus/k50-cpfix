@@ -154,4 +154,11 @@ static inline int cpfix_clamp_r(int ibus, int headroom_mv)
 	return cpfix_clamp(CPFIX_R_STOCK + headroom_mv * 1000 / i, CPFIX_R_STOCK, CPFIX_CLAMP_R_MAX);
 }
 
+/* P10: input current (uA) of the HVCHG (QC2 9 V) branch of do_algorithm, stock 1600 mA. */
+static inline int cpfix_hvchg_icl_ua(int icl_ma)
+{
+	(void)icl_ma;
+	return 1600000;	/* stub until the tests have failed once */
+}
+
 #endif /* CPFIX_POLICY_H */

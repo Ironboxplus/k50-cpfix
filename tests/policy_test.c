@@ -16,7 +16,7 @@ static const struct param params[] = {
 
 static void test_param_table(void)
 {
-	/* Ranges and defaults from PLAN §2.3, P7 v3 and P8. */
+	/* Ranges and defaults from PLAN §2.3, P7 v3, P8 and P10. */
 	static const struct param want[] = {
 		{ "enable", 1, 0, 1, 0 },
 		{ "entry_vbat_margin_mv", 90, 0, 250, 0 },
@@ -32,6 +32,7 @@ static void test_param_table(void)
 		{ "clamp_headroom_mv", 400, 0, 800, 0 },
 		{ "fv_drop_max_mv", 0, 0, 100, 0 },
 		{ "fv_ceiling_mv", 4440, 4000, 4440, 0 },
+		{ "hvchg_icl_ma", 2000, 500, 2000, 0 },
 	};
 	unsigned int i, j, n = sizeof(params) / sizeof(params[0]);
 
@@ -84,6 +85,8 @@ static void test_clamp_boundaries(void)
 	EQ(cpfix_clamp_param(3999, 4000, 4440, 0), 4000, "fv_ceiling 3999");
 	EQ(cpfix_clamp_param(4441, 4000, 4440, 0), 4440, "fv_ceiling 4441");
 	EQ(cpfix_clamp_param(4500, 4000, 4440, 0), 4440, "fv_ceiling never above DT fv");
+	EQ(cpfix_clamp_param(499, 500, 2000, 0), 500, "hvchg_icl 499");
+	EQ(cpfix_clamp_param(2001, 500, 2000, 0), 2000, "hvchg_icl 2001");
 }
 
 static void test_high_soc(void)
@@ -207,6 +210,21 @@ static void test_clamp_r(void)
 	EQ(2400 * cpfix_clamp_r(2400, 400) / 1000, 840 + 398, "bound offset at 2.4 A (floor)");
 }
 
+static void test_hvchg_icl(void)
+{
+	/* P10: x9 of do_algorithm's HVCHG branch in uA, stock 1600000 */
+	EQ(cpfix_hvchg_icl_ua(2000), 2000000, "default 2 A");
+	EQ(cpfix_hvchg_icl_ua(1600), 1600000, "1600 = stock");
+	EQ(cpfix_hvchg_icl_ua(500), 500000, "min");
+	EQ(cpfix_hvchg_icl_ua(1700), 1700000, "in range");
+	/* never outside 500..2000 mA, whatever the variable holds */
+	EQ(cpfix_hvchg_icl_ua(2001), 2000000, "above max");
+	EQ(cpfix_hvchg_icl_ua(100000), 2000000, "far above max");
+	EQ(cpfix_hvchg_icl_ua(499), 500000, "below min");
+	EQ(cpfix_hvchg_icl_ua(0), 500000, "0");
+	EQ(cpfix_hvchg_icl_ua(-1), 500000, "negative");
+}
+
 int main(void)
 {
 	test_param_table();
@@ -218,5 +236,6 @@ int main(void)
 	test_fcc_cap();
 	test_fv();
 	test_clamp_r();
+	test_hvchg_icl();
 	return check_report();
 }

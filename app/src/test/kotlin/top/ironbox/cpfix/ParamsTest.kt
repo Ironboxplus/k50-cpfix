@@ -22,7 +22,7 @@ class ParamsTest {
     @Test
     fun matchesKernelHeader() {
         val c = kernelParams()
-        assertEquals(14, c.size)
+        assertEquals(15, c.size)
         assertEquals(c, Params.all.map { CParam(it.name, it.default, it.min, it.max, it.zeroOk) })
     }
 
@@ -40,6 +40,11 @@ class ParamsTest {
         assertEquals(0, head.clamp(0))
         assertEquals(800, head.clamp(801))
         assertEquals(400, head.default)
+        val icl = Params.byName.getValue("hvchg_icl_ma")
+        assertEquals(500, icl.clamp(0))
+        assertEquals(500, icl.clamp(499))
+        assertEquals(2000, icl.clamp(2001))
+        assertEquals(2000, icl.default)
     }
 
     @Test
