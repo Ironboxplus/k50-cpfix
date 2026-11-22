@@ -247,6 +247,17 @@ static int cpfix_pre_p8_x9(struct kprobe *p, struct pt_regs *regs)
 	return 0;
 }
 
+/*
+ * P10 do_algorithm `cbz x10` of the HVCHG branch: w9 = 1600000 uA input current,
+ * stored to info+0x90 on both paths after the branch
+ */
+static int cpfix_pre_p10(struct kprobe *p, struct pt_regs *regs)
+{
+	if (cpfix_on(p))
+		set_w(regs, 9, cpfix_hvchg_icl_ua(READ_ONCE(cp_hvchg_icl_ma)));
+	return 0;
+}
+
 static struct cpfix_point cpfix_points[] = {
 #define PP(pid, mod, sym, off, insn, fn)                                      \
 	{ .id = #pid, .module = mod, .symbol = sym, .offset = off,            \

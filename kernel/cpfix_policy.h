@@ -25,7 +25,8 @@
 	X(fcc_cap_ma, 0, 500, 12400, 1)                \
 	X(clamp_headroom_mv, 400, 0, 800, 0)           \
 	X(fv_drop_max_mv, 0, 0, 100, 0)                \
-	X(fv_ceiling_mv, 4440, 4000, 4440, 0)
+	X(fv_ceiling_mv, 4440, 4000, 4440, 0)          \
+	X(hvchg_icl_ma, 2000, 500, 2000, 0)
 
 #define CPFIX_TEMP_MAX_AGE_MS 10000	/* older battery temperature counts as hot */
 #define CPFIX_BAND_MIN_GAP 10		/* batt_temp_lo <= batt_temp_hi - 10 (0.1 degC) */
@@ -36,6 +37,10 @@
 #define CPFIX_R_STOCK 350		/* vendor MAX_CABLE_RESISTANCE (mOhm) */
 #define CPFIX_CLAMP_MIN_IBUS 50		/* mA, divisor floor */
 #define CPFIX_CLAMP_R_MAX 40000		/* mOhm: 6200 mA x 40000 < 2^31 in the vendor mul */
+
+/* P10 HVCHG input current, the hvchg_icl_ma range: QC2 9 V 2 A at most */
+#define CPFIX_HVCHG_ICL_MIN 500
+#define CPFIX_HVCHG_ICL_MAX 2000
 
 static inline int cpfix_streq(const char *a, const char *b)
 {
@@ -157,8 +162,7 @@ static inline int cpfix_clamp_r(int ibus, int headroom_mv)
 /* P10: input current (uA) of the HVCHG (QC2 9 V) branch of do_algorithm, stock 1600 mA. */
 static inline int cpfix_hvchg_icl_ua(int icl_ma)
 {
-	(void)icl_ma;
-	return 1600000;	/* stub until the tests have failed once */
+	return cpfix_clamp(icl_ma, CPFIX_HVCHG_ICL_MIN, CPFIX_HVCHG_ICL_MAX) * 1000;
 }
 
 #endif /* CPFIX_POLICY_H */

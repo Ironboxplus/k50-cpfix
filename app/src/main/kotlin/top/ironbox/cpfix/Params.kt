@@ -63,6 +63,8 @@ object Params {
             unit = "mV", step = 10),
         Param("fv_ceiling_mv", 4440, 4000, 4440, false, "充电电压硬上限", "原厂 DT fv / fv_ffc 4440 mV，不允许更高",
             unit = "mV", step = 10),
+        Param("hvchg_icl_ma", 2000, 500, 2000, false, "QC 快充输入电流", "原厂 1600 mA（HVCHG，A 口 QC2 9 V）",
+            unit = "mA", step = 100),
     )
 
     val byName: Map<String, Param> = all.associateBy { it.name }

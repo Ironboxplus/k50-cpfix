@@ -2,7 +2,7 @@
 
 Charge-pump fix for the Redmi K50 (rubens, HyperOS OS2.0.10, GKI android12-5.10).
 
-The vendor `pd_cp_manager` / `mtk_charger_framework` modules throttle the 2×SC8551 charge pump by battery cycle count and gate FFC behind Xiaomi's adapter authentication. `cpfix.ko` uses kprobes on verified instructions of the running vendor modules to restore the new-battery behaviour, without touching voltage limits or safety exits. Unloading it restores stock behaviour.
+The vendor `pd_cp_manager` / `mtk_charger_framework` modules throttle the 2×SC8551 charge pump by battery cycle count and gate FFC behind Xiaomi's adapter authentication. `cpfix.ko` uses kprobes on verified instructions of the running vendor modules to restore the new-battery behaviour, without touching voltage limits or safety exits. It also raises the input current of the HVCHG (QC2 9 V) buck path from the vendor 1600 mA to 2000 mA. Unloading it restores stock behaviour.
 
 - `kernel/` – the LKM
 - `ksu/` – KernelSU module scripts
