@@ -70,7 +70,7 @@ jobs:
               has '^\.github/workflows/' && sel=all
               has '^(kernel|device)/' && sel="$sel,kernel-tests,app"
               has '^(tests|tools)/' && sel="$sel,kernel-tests"
-              has '^ksu/' && sel="$sel,scripts"
+              has '^(ksu/|tests/.*\.sh$)' && sel="$sel,scripts"
               has '^app/' && sel="$sel,app"
             fi
           fi
@@ -197,11 +197,21 @@ jobs:
       - name: shellcheck -s sh
         run: |
           shellcheck --version
-          shellcheck -s sh ksu/*.sh
+          shellcheck -s sh ksu/*.sh tests/*.sh
       - name: "expect-fail: shellcheck catches an unquoted expansion"
         run: |
           printf '#!/system/bin/sh\nf=$1\nrm $f\n' > /tmp/bad.sh
           if shellcheck -s sh /tmp/bad.sh; then echo "shellcheck accepted a bad script"; exit 1; fi
+          echo "negative control: rejected as expected"
+      - name: Old unthrottle script stays enabled
+        if: ${{ !cancelled() }}
+        run: sh tests/ksu_flag_test.sh
+      - name: "expect-fail: flag check catches a touch of the old flag"
+        if: ${{ !cancelled() }}
+        run: |
+          cp ksu/service.sh /tmp/bad_service.sh
+          printf 'touch /data/adb/charge_unthrottle.disable\n' >> /tmp/bad_service.sh
+          if sh tests/ksu_flag_test.sh /tmp/bad_service.sh ksu/uninstall.sh; then echo "flag check accepted a touch"; exit 1; fi
           echo "negative control: rejected as expected"
 
   app:
