@@ -5,9 +5,13 @@ MODDIR=${0%/*}
 DATA=/data/adb/cpfix
 CONF=$DATA/cpfix.conf
 LOG=$DATA/cpfix.log
-OLD_FLAG=/data/adb/charge_unthrottle.disable
 # keys accepted from cpfix.conf: the module parameters, nothing else
 KEYS="enable entry_vbat_margin_mv entry_high_soc fast_ramp taper_reduce_ma ffc_any_pps thermal_override thermal_override_ma batt_temp_hi batt_temp_lo fcc_cap_ma clamp_headroom_mv fv_drop_max_mv fv_ceiling_mv hvchg_icl_ma"
+
+# The old /data/adb/service.d/k50_charge_unthrottle.sh keeps running beside cpfix: P6 does not
+# reach the buck charging current, which follows the charge_control_limit level. Undo the flag
+# with which the 0.2.17 zip stopped it.
+rm -f /data/adb/charge_unthrottle.disable
 
 [ -f "$MODDIR/disable" ] && exit 0
 [ -f "$MODDIR/remove" ] && exit 0
@@ -28,7 +32,6 @@ log "service start, $(grep '^version=' "$MODDIR/module.prop")"
 if [ -d /sys/module/cpfix ]; then
   log "cpfix already loaded"
   set_description "loaded earlier | $(cat /sys/kernel/cpfix/version 2>/dev/null)"
-  touch "$OLD_FLAG"
   exit 0
 fi
 
@@ -40,7 +43,6 @@ done
 if [ ! -d /sys/devices/platform/pd_cp_manager ]; then
   log "pd_cp_manager did not appear in 120 s"
   set_description "failed: pd_cp_manager missing"
-  rm -f "$OLD_FLAG"
   exit 1
 fi
 
@@ -64,10 +66,8 @@ if [ "$rc" = 0 ]; then
   n=$(grep -c . /sys/kernel/cpfix/patches 2>/dev/null)
   log "loaded, $n patch points"
   set_description "loaded, $n patch points verified | $(cat /sys/kernel/cpfix/version 2>/dev/null)"
-  touch "$OLD_FLAG"
 else
   log "insmod failed: rc=$rc"
   set_description "load failed (rc=$rc), stock behaviour; see $LOG"
-  rm -f "$OLD_FLAG"
 fi
 exit "$rc"
