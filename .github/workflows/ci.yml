@@ -170,6 +170,9 @@ jobs:
       - name: Patch points against the vendor fixtures
         if: ${{ !cancelled() }}
         run: python tools/verify_patchpoints.py
+      - name: Startup hook argument and branch contract
+        if: ${{ !cancelled() }}
+        run: python tools/verify_startup_contract.py
       - name: "expect-fail: patch points with every offset +4"
         if: ${{ !cancelled() }}
         run: python tools/verify_patchpoints.py --bias 4 --expect-all-fail

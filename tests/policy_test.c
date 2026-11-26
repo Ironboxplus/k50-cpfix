@@ -19,6 +19,7 @@ static void test_param_table(void)
 	/* Ranges and defaults from PLAN §2.3, P7 v3, P8 and P10. */
 	static const struct param want[] = {
 		{ "enable", 1, 0, 1, 0 },
+		{ "startup_guard", 0, 0, 1, 0 },
 		{ "entry_vbat_margin_mv", 90, 0, 250, 0 },
 		{ "entry_high_soc", 0, 50, 95, 1 },
 		{ "fast_ramp", 1, 0, 1, 0 },

@@ -9,7 +9,7 @@ enum cpfix_start_action {
 };
 
 struct cpfix_start_sample {
-	int state, mode, pd_type;
+	int state, mode, pd_type, bypass;
 	unsigned int valid; /* bit 0 VBUS, 1 VBAT, 2/3 enable reads, 4/5 converter reads */
 	unsigned int converter[2], enabled;
 	int vbus, cp_vbat, bms_vbat;
@@ -31,7 +31,7 @@ cpfix_start_decide(const struct cpfix_start_sample *s)
 	unsigned int status = s->converter[0] | s->converter[1];
 	enum cpfix_start_action action;
 	int low, high;
-	if (s->mode != 1 || s->state < 1 || s->state > 3)
+	if (s->mode != 1 || s->bypass || s->state < 1 || s->state > 3)
 		return CP_START_KEEP;
 	if (s->valid != CP_START_VALID || s->pd_type != 4 || s->request_failed ||
 	    s->cp_vbat <= 0 || s->cp_vbat > 5118 || s->vbus < 0 || s->vbus > 15356 ||
@@ -77,6 +77,18 @@ static inline int cpfix_start_first_mv(const struct cpfix_start_sample *s)
 	int v = 2 * s->cp_vbat + s->low_gap;
 	return v < s->min_request ? s->min_request :
 		v > s->max_request ? s->max_request : v;
+}
+
+/* Operands of the installed INIT_VBUS CMPs: second threshold is base+high_gap. */
+static inline void cpfix_start_window_operands(enum cpfix_start_action action,
+		int vbus, int high_gap, int *low, int *base)
+{
+	if (action == CP_START_UP)
+		*low = vbus;
+	else if (action == CP_START_DOWN || action == CP_START_READY) {
+		*low = vbus - 1;
+		*base = vbus + (action == CP_START_READY) - high_gap;
+	}
 }
 
 /* Vendor HOLD=1 retries through pump disable and buck fallback; EXIT=2 stops. */

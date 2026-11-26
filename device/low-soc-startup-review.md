@@ -104,8 +104,43 @@ that conversion has started. Their effects must remain in the regression matrix.
    PD reset/re-entry failure is a separate part of the repair, not explained by
    this startup trace alone.
 
-Runtime implementation is not yet release-ready. Remaining integration work:
-scope fresh converter samples to the correct PDM invocation and pump; check
-I2C errors and ADC validity; establish bounded recovery and PD-reset behavior;
-verify every binary hook and failure path in Actions; then validate actual
-switching/current and fallback on the phone. No new repair has been loaded.
+## Development implementation and remaining acceptance
+
+`kernel/cpfix_startup.h` now implements the startup decisions and bounded retry
+policy. `kernel/cpfix_startup_hooks.h` captures the existing read results in the
+same PDM invocation, keyed by task and the two chip pointers. The six validity
+bits are cleared every invocation, and samples spanning more than one second
+are rejected. The diagnostic attribute `/sys/kernel/cpfix/startup` includes the
+read mask, converter bytes, both battery readings, decision and recovery count.
+
+`startup_guard=0` is the development default: observe only, leaving the previous
+cpfix features available. `startup_guard=1` with `enable=1` applies the new
+decisions. Only SC8551 2:1 with bypass disabled is covered. Mode transitions and
+other ratios retain their existing behavior. This is not yet a released fix.
+
+* Initial voltage uses the validated pump-side VBAT and the existing low gap,
+  bounded by the installed vendor's 3600 mV floor and DT/APDO maxima.
+* Subsequent startup adjustments retain the original 40 mV steps and 40-iteration
+  bound. Hardware ERRORHI/ERRORLO has priority over the numerical ADC window.
+* Startup waits for both converters to switch. A hardware window error, invalid
+  sample, exhausted wait, lost switching or failed PD request selects the vendor
+  EXIT branch, preserving its pump-disable and power-path handling.
+* The first two recoveries use vendor HOLD (retry); the third uses vendor EXIT
+  (stop the pump retry loop). Five seconds of healthy TUNE resets that budget.
+  A new ENTRY after terminal stop also resets it. No protection is cleared.
+
+Actions 45773849582 compiled the baseline model and then failed the behavioral
+assertions, including the actual false-start snapshots. Actions 45774513383
+built the first integration and passed 159 startup checks, 271 existing policy
+checks, the clamp simulation and all 22 instruction patch points. This does not
+verify kprobe registration or the behavior of actual hardware.
+
+Acceptance still required: verify the complete instruction context; observe
+fresh per-invocation samples on the phone with the guard disabled; apply the
+guard and measure real switching and battery current across a low-SOC entry;
+exercise failed requests and verify actual buck charging after recovery. A
+stopped PDM state machine alone is not a successful fallback. At
+`do_algorithm` .text 0x125dc..0x12638 the installed framework re-enables the buck
+only under its current, algorithm, suspend and other enable conditions; the
+new guard does not override these. PD-reset recovery must be measured separately.
+No new repair has been loaded, and final root-cause closure remains unproven.

@@ -13,6 +13,7 @@
  */
 #define CPFIX_PARAMS(X)                                \
 	X(enable, 1, 0, 1, 0)                          \
+	X(startup_guard, 0, 0, 1, 0)                   \
 	X(entry_vbat_margin_mv, 90, 0, 250, 0)         \
 	X(entry_high_soc, 0, 50, 95, 1)                \
 	X(fast_ramp, 1, 0, 1, 0)                       \

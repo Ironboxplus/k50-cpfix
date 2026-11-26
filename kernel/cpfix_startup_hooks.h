@@ -58,7 +58,7 @@ static int cpfix_pre_start_begin(struct kprobe *p, struct pt_regs *r)
 	cp_start.action = CP_START_KEEP;
 	cp_start.stamp = jiffies;
 	cp_start.collecting = true;
-	cp_start.apply = on;
+	cp_start.apply = on && READ_ONCE(cp_startup_guard);
 	raw_spin_unlock_irqrestore(&cp_start_lock, irq);
 	return 0;
 }
@@ -131,6 +131,7 @@ static int cpfix_pre_start_dispatch(struct kprobe *p, struct pt_regs *r)
 	s->state = cp_start_int(base, 0x218);
 	s->mode = cp_start_int(base, 0x2d0);
 	s->pd_type = cp_start_int(base, 0x220);
+	s->bypass = READ_ONCE(*(u8 *)(base + 0x22a));
 	s->vbus = cp_start_int(base, 0x23c);
 	s->cp_vbat = cp_start_int(base, 0x240);
 	s->bms_vbat = cp_start_int(base, 0x260);
@@ -191,19 +192,18 @@ static int cpfix_pre_start_first(struct kprobe *p, struct pt_regs *r)
 static int cpfix_pre_start_window(struct kprobe *p, struct pt_regs *r)
 {
 	unsigned long irq;
-	int v;
+	int v, low, base;
 	cpfix_on(p);
 	if (!READ_ONCE(cpfix_armed))
 		return 0;
 	raw_spin_lock_irqsave(&cp_start_lock, irq);
 	if (cp_start_owned(r->regs[19]) && cp_start.apply) {
 		v = (int)r->regs[10];
-		if (cp_start.action == CP_START_UP) {
-			set_w(r, 12, v);
-		} else if (cp_start.action == CP_START_DOWN || cp_start.action == CP_START_READY) {
-			set_w(r, 12, v - 1);
-			set_w(r, 11, v + (cp_start.action == CP_START_READY) - cp_start.sample.high_gap);
-		}
+		low = (int)r->regs[12];
+		base = (int)r->regs[11];
+		cpfix_start_window_operands(cp_start.action, v, cp_start.sample.high_gap, &low, &base);
+		set_w(r, 12, low);
+		set_w(r, 11, base);
 	}
 	raw_spin_unlock_irqrestore(&cp_start_lock, irq);
 	return 0;

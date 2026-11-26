@@ -19,7 +19,7 @@ int main(void)
 {
 	struct cpfix_start_sample s = failing_start();
 	unsigned int bit;
-	int failures = 0, i;
+	int failures = 0, i, low, base;
 	EQ(cpfix_start_decide(&s), CP_START_DOWN, "hardware ERRORHI overrides stale BMS window");
 	s.state = 2; s.enabled = 3; s.cp_vbat = 3182;
 	EQ(cpfix_start_decide(&s), CP_START_RECOVER, "321688.338: enabled but not switching");
@@ -67,6 +67,8 @@ int main(void)
 	EQ(cpfix_start_decide(&s), CP_START_KEEP, "4:1 is outside this verified repair");
 	s.mode = 1; s.state = 4;
 	EQ(cpfix_start_decide(&s), CP_START_KEEP, "never interfere with vendor EXIT");
+	s = failing_start(); s.bypass = 1;
+	EQ(cpfix_start_decide(&s), CP_START_KEEP, "pending bypass transition is not a 2:1 startup");
 	s = failing_start(); s.init_count = 0; s.cp_vbat = 3642;
 	EQ(cpfix_start_decide(&s), CP_START_FIRST, "first request uses a valid fresh sample");
 	EQ(cpfix_start_first_mv(&s), 7684, "entry setpoint from pump-side VBAT");
@@ -98,5 +100,12 @@ int main(void)
 	LE(i, 38, "startup reaches a valid window before vendor timeout");
 	s.state = 2; s.enabled = 3; s.converter[0] = s.converter[1] = 0x04;
 	EQ(cpfix_start_decide(&s), CP_START_KEEP, "converged startup can enter regulation");
+	for (i = CP_START_UP; i <= CP_START_READY; i++) {
+		low = 7836; base = 7436;
+		cpfix_start_window_operands(i, 7991, 600, &low, &base);
+		/* The actual ELF checks VBUS<=low, then VBUS>=base+high_gap. */
+		EQ(7991 <= low ? CP_START_UP : 7991 >= base+600 ? CP_START_DOWN : CP_START_READY,
+		   i, "comparison operands reach the intended vendor branch %d", i);
+	}
 	return check_report();
 }
