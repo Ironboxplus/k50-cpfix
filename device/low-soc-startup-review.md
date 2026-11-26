@@ -143,4 +143,8 @@ stopped PDM state machine alone is not a successful fallback. At
 `do_algorithm` .text 0x125dc..0x12638 the installed framework re-enables the buck
 only under its current, algorithm, suspend and other enable conditions; the
 new guard does not override these. PD-reset recovery must be measured separately.
-No new repair has been loaded, and final root-cause closure remains unproven.
+Update: the d678ed8 development module was later loaded temporarily in
+observation-only mode (`startup_guard=0`); its new control decisions have not
+been enabled. See `validation-20261126.md` for exact runtime evidence, the
+cooldown entry trigger and remaining acceptance. Final root-cause closure
+remains unproven.
