@@ -11,6 +11,11 @@ This is a development checkpoint, not final repair acceptance.
   observation snapshots, reports uninitialised age as -1, labels disabled
   startup hooks as `observe`, and prevents a bypass KEEP decision from counting
   as healthy 2:1 operation. This commit is not loaded on the phone yet.
+* `a84f2db`: Actions 45780173780 passed all jobs. It adds the actual retry-path
+  contract: the hook runs after the vendor's `ADD x19` and before
+  `__msecs_to_jiffies`, both scheduler branches land on it, and a negative
+  control rejects the old location that was overwritten by the vendor's 500 ms
+  constant. It also adds detach-state clearing and 2/5/15-second backoff.
 * Baseline behavioral regression: 45773849582 compiled successfully and failed
   assertions on false startup and unbounded unloaded ramp. This is distinct
   from the discarded 207f7c4 test, which failed to compile.
@@ -107,3 +112,24 @@ that point were VBUS=7mV and IBUS=3mA per pump.
   against the existing user-approved limits; CC=2500mA remains accepted.
 * Do not promote the development implementation to main or persistent install
   on the strength of these observation-mode results.
+
+## Current implementation status
+
+As of `a84f2db`, the development module contains the complete intended runtime
+logic for the verified 2:1 SC8551 path: pump-side VBAT startup-window input,
+ERRORHI/ERRORLO and SWITCHING checks, no upward TUNE ramp without switching,
+vendor HOLD/buck fallback, bounded automatic retry, PD-result error capture,
+and detach reset. Actions 45780173780 built it, checked 24 patch points, ran
+172 startup assertions and the branch-level scheduler contract, and passed the
+full App/scripts/package gate.
+
+“Implemented” here means source, binary context and host-level behavior are
+verified. It does not mean the guard has been enabled on the phone: no low-SOC
+failure has yet been reproduced with `startup_guard=1`, and no real recovery
+cycle has been accepted. The phone remains on the restored 0.2.19 module.
+
+The bounded QC sample collected in the same session remained Charging for six
+samples over about 30 seconds: USB input 8.612–8.650 V at 1.537–1.690 A,
+battery current -2.330 to -2.356 A, CC 2500 mA, AICR 2000 mA, temperature
+41.2–41.4°C. This proves stable operation at that observed state, not a
+low-SOC PPS maximum-power result.
