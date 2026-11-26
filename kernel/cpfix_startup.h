@@ -71,6 +71,13 @@ cpfix_start_decide(const struct cpfix_start_sample *s)
 	return s->state == 2 && s->enable_count < 4 ? CP_START_WAIT : CP_START_RECOVER;
 }
 
+/* KEEP also means outside our scope: it is not, by itself, evidence of health. */
+static inline int cpfix_start_healthy(const struct cpfix_start_sample *s)
+{
+	return s->state == 3 && s->mode == 1 && !s->bypass &&
+		cpfix_start_decide(s) == CP_START_KEEP;
+}
+
 /* Called only after CP_START_FIRST validated the sample and bounds. */
 static inline int cpfix_start_first_mv(const struct cpfix_start_sample *s)
 {

@@ -31,12 +31,17 @@ int main(void)
 	s.converter[0] = s.converter[1] = 0x04;
 	s.cp_vbat = 3563; s.bms_vbat = 3573; s.vbus = 7698;
 	EQ(cpfix_start_decide(&s), CP_START_KEEP, "working pump allowed to regulate");
+	EQ(cpfix_start_healthy(&s), 1, "confirmed switching can reset the recovery budget");
+	s.bypass = 1;
+	EQ(cpfix_start_healthy(&s), 0, "unsupported bypass is not healthy 2:1 evidence");
+	s.bypass = 0;
 	/* A high source request can be valid when the cable carries current. */
 	s.request = 10800; s.vbus = 8500; s.cp_vbat = 4000;
 	EQ(cpfix_start_decide(&s), CP_START_KEEP, "no universal 2VBAT+600 request cap");
 	for (bit = 1; bit <= 32; bit <<= 1) {
 		s.valid = CP_START_VALID & ~bit;
 		EQ(cpfix_start_decide(&s), CP_START_RECOVER, "read failure bit %u", bit);
+		EQ(cpfix_start_healthy(&s), 0, "read failure cannot reset the recovery budget %u", bit);
 	}
 	s.valid = CP_START_VALID; s.request_failed = 1;
 	EQ(cpfix_start_decide(&s), CP_START_RECOVER, "failed PD request must exit regulation");

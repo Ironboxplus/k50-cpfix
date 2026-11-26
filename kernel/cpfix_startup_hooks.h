@@ -10,7 +10,11 @@ static struct {
 	struct task_struct *owner;
 	unsigned long pdpm, chip[2], stamp, healthy_since;
 	struct cpfix_start_sample sample;
+	struct cpfix_start_sample published;
 	enum cpfix_start_action action;
+	enum cpfix_start_action published_action;
+	unsigned long published_stamp;
+	bool published_apply;
 	bool collecting, apply, terminal, healthy;
 	int failures, last_ret;
 	bool request_failed;
@@ -127,7 +131,7 @@ static int cpfix_pre_start_dispatch(struct kprobe *p, struct pt_regs *r)
 	if (!cp_start_owned(base))
 		goto out;
 	cp_start.collecting = false;
-	cp_start.apply = cp_start.apply && on;
+	cp_start.apply = cp_start.apply && on && READ_ONCE(cp_startup_guard);
 	s->state = cp_start_int(base, 0x218);
 	s->mode = cp_start_int(base, 0x2d0);
 	s->pd_type = cp_start_int(base, 0x220);
@@ -159,7 +163,7 @@ static int cpfix_pre_start_dispatch(struct kprobe *p, struct pt_regs *r)
 		WRITE_ONCE(*(int *)(base + 0x218), 4);
 		set_w(r, 9, 4);
 	}
-	if (cp_start.apply && s->state == 3 && s->mode == 1 && cp_start.action == CP_START_KEEP) {
+	if (cp_start.apply && cpfix_start_healthy(s)) {
 		if (!cp_start.healthy) {
 			cp_start.healthy = true;
 			cp_start.healthy_since = jiffies;
@@ -169,6 +173,11 @@ static int cpfix_pre_start_dispatch(struct kprobe *p, struct pt_regs *r)
 	} else {
 		cp_start.healthy = false;
 	}
+	/* Do not expose a partially filled sample while the next I2C reads run. */
+	cp_start.published = *s;
+	cp_start.published_action = cp_start.action;
+	cp_start.published_apply = cp_start.apply;
+	cp_start.published_stamp = cp_start.stamp;
 out:
 	raw_spin_unlock_irqrestore(&cp_start_lock, irq);
 	return 0;
@@ -242,19 +251,20 @@ static int cpfix_pre_start_pd_result(struct kprobe *p, struct pt_regs *r)
 static ssize_t startup_show(struct kobject *kobj, struct kobj_attribute *attr, char *buf)
 {
 	struct cpfix_start_sample s;
-	unsigned long irq, scans, recoveries, age;
+	unsigned long irq, scans, recoveries;
+	long age;
 	int action, failures, ret, apply;
 	raw_spin_lock_irqsave(&cp_start_lock, irq);
-	s = cp_start.sample;
-	action = cp_start.action; failures = cp_start.failures; ret = cp_start.last_ret;
-	apply = cp_start.apply; scans = cp_start.scans; recoveries = cp_start.recoveries;
-	age = jiffies_to_msecs(jiffies - cp_start.stamp);
+	s = cp_start.published;
+	action = cp_start.published_action; failures = cp_start.failures; ret = cp_start.last_ret;
+	apply = cp_start.published_apply; scans = cp_start.scans; recoveries = cp_start.recoveries;
+	age = scans ? (long)jiffies_to_msecs(jiffies - cp_start.published_stamp) : -1;
 	raw_spin_unlock_irqrestore(&cp_start_lock, irq);
 	return scnprintf(buf, PAGE_SIZE,
-		"state=%d mode=%d valid=%#x converter=%02x,%02x enabled=%u "
+		"state=%d mode=%d pd_type=%d bypass=%d valid=%#x converter=%02x,%02x enabled=%u "
 		"vbus=%d cp_vbat=%d bms_vbat=%d request=%d action=%d apply=%d "
-		"failures=%d pd_ret=%d scans=%lu recoveries=%lu age_ms=%lu\n",
-		s.state, s.mode, s.valid, s.converter[0], s.converter[1], s.enabled,
+		"failures=%d pd_ret=%d scans=%lu recoveries=%lu age_ms=%ld\n",
+		s.state, s.mode, s.pd_type, s.bypass, s.valid, s.converter[0], s.converter[1], s.enabled,
 		s.vbus, s.cp_vbat, s.bms_vbat, s.request, action, apply, failures, ret,
 		scans, recoveries, age);
 }

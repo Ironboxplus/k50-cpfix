@@ -288,7 +288,6 @@ static int cpfix_register_all(void)
 
 	for (i = 0; i < ARRAY_SIZE(cpfix_points); i++) {
 		struct cpfix_point *pt = &cpfix_points[i];
-
 		snprintf(pt->name, sizeof(pt->name), "%s:%s", pt->module, pt->symbol);
 		pt->kp.symbol_name = pt->name;
 		pt->kp.offset = pt->offset;
@@ -364,10 +363,14 @@ static ssize_t patches_show(struct kobject *kobj, struct kobj_attribute *attr, c
 
 	for (i = 0; i < ARRAY_SIZE(cpfix_points); i++) {
 		struct cpfix_point *pt = &cpfix_points[i];
+		const char *point_state = state;
+
+		if (pt->id[0] == 'S' && READ_ONCE(cp_enable) && !READ_ONCE(cp_startup_guard))
+			point_state = "observe";
 
 		n += scnprintf(buf + n, PAGE_SIZE - n, "%s %s+%#x %px %#010x %#010x %s %ld\n",
 			       pt->id, pt->name, pt->offset, pt->kp.addr, pt->expected,
-			       pt->kp.opcode, state, atomic_long_read(&pt->hits));
+			       pt->kp.opcode, point_state, atomic_long_read(&pt->hits));
 	}
 	return n;
 }
