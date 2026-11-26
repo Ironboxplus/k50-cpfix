@@ -37,6 +37,11 @@ unload the observer, and load the saved rollback module with those arguments.
 The original KSU module also remains the next-boot installation. Do not pass
 the new startup_guard parameter to the old module.
 
+After completing the bounded observation, the temporary module was unloaded
+and 0.2.19-c7d00f3928da was restored using every saved parameter. Version readback
+confirmed restoration. The phone is no longer running the observation candidate;
+the new guard was never enabled during this trial.
+
 ## QC observations
 
 The user confirmed a USB-A/QC source. Before and after the observer load, the
