@@ -156,6 +156,12 @@ jobs:
           mkdir -p out
           gcc -std=c11 -Wall -Wextra -Werror -I kernel -I tests -o out/policy_test tests/policy_test.c
           ./out/policy_test
+      - name: Startup regression from device observations
+        if: ${{ !cancelled() }}
+        run: |
+          mkdir -p out
+          gcc -std=c11 -Wall -Wextra -Werror -I kernel -I tests -o out/startup_test tests/startup_test.c
+          ./out/startup_test
       - name: Tune clamp simulation (sources A-D, static-clamp negative controls)
         if: ${{ !cancelled() }}
         run: |
