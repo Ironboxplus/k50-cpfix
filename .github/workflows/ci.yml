@@ -173,6 +173,13 @@ jobs:
       - name: Startup hook argument and branch contract
         if: ${{ !cancelled() }}
         run: python tools/verify_startup_contract.py
+      - name: "expect-fail: retry hook before MOV W0,500 is rejected"
+        if: ${{ !cancelled() }}
+        run: |
+          if python tools/verify_startup_contract.py --scheduler-bias -4; then
+            echo "invalid retry hook was accepted"; exit 1
+          fi
+          echo "negative control: overwritten and bypassed retry delay rejected"
       - name: "expect-fail: patch points with every offset +4"
         if: ${{ !cancelled() }}
         run: python tools/verify_patchpoints.py --bias 4 --expect-all-fail

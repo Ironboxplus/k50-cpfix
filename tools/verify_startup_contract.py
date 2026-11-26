@@ -4,8 +4,9 @@
 Unlike the single-instruction patch-point check, this checks the argument,
 result, field and branch layout surrounding the new hooks. No hash comparison.
 """
+import argparse
 import struct
-from verify_patchpoints import Module, ROOT
+from verify_patchpoints import Module, ROOT, parse_def
 from elftools.elf.relocation import RelocationSection
 
 
@@ -35,6 +36,10 @@ def call(mod, symbol, offset, target):
 
 
 def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--scheduler-bias", type=int, default=0,
+                        help="Negative control: move the actual S13 definition by this many bytes")
+    args = parser.parse_args()
     pdm = Module(ROOT / "tests/fixtures/vendor/pd_cp_manager.ko")
     sc = Module(ROOT / "tests/fixtures/vendor/sc8551.ko")
     main_sm = "pdm_main_sm"
@@ -59,9 +64,24 @@ def main():
     words(pdm, main_sm, 0x9d0, [0x394002c1, 0x34000281, 0x394002a8, 0x34000248])
     for off in (0xac0, 0x1030, 0x1280):
         call(pdm, main_sm, off, "adapter_dev_set_cap_xm")
-    words(pdm, main_sm, 0x10d0, [0x52803e80])
-    call(pdm, main_sm, 0x10d8, "__msecs_to_jiffies")
-    call(pdm, main_sm, 0x10f0, "queue_delayed_work_on")
+    scheduler = next(p for p in parse_def(ROOT / "kernel/patchpoints.def") if p["id"] == "S13")
+    assert scheduler["symbol"] == main_sm and scheduler["module"] == "pd_cp_manager"
+    scheduler_off = scheduler["offset"] + args.scheduler_bias
+    # The pre-handler changes W0. The displaced ADD must preserve W0 and the
+    # very next instruction must consume it, rather than overwrite it with 500.
+    words(pdm, main_sm, scheduler_off, [0x9100e273])
+    call(pdm, main_sm, scheduler_off + 4, "__msecs_to_jiffies")
+    call(pdm, main_sm, scheduler_off + 0x1c, "queue_delayed_work_on")
+    # Both the no_delay and normal-table paths must land at the actual hook.
+    sym = pdm.functions(main_sm)[0]
+    data = pdm.elf.get_section(sym["st_shndx"]).data()
+    for branch_off in (0x10a8, 0x10c4):
+        insn, = struct.unpack_from("<I", data, sym["st_value"] + branch_off)
+        assert insn >> 26 == 0b000101, "expected unconditional branch"
+        imm = insn & 0x3ffffff
+        if imm & 0x2000000:
+            imm -= 0x4000000
+        assert branch_off + imm * 4 == scheduler_off, "retry path bypasses S13"
     # The detach observer runs only after the previous worker is joined.
     words(pdm, "pdm_psy_change", 0x1ac, [0x3908927f])
     words(pdm, "pdm_psy_change", 0x1bc, [0x9100e260])
