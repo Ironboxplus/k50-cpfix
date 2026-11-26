@@ -33,6 +33,7 @@ static void test_param_table(void)
 		{ "fv_drop_max_mv", 0, 0, 100, 0 },
 		{ "fv_ceiling_mv", 4440, 4000, 4440, 0 },
 		{ "hvchg_icl_ma", 2000, 500, 2000, 0 },
+		{ "vbus_guard_mv", 600, 0, 1200, 0 },
 	};
 	unsigned int i, j, n = sizeof(params) / sizeof(params[0]);
 
@@ -225,6 +226,18 @@ static void test_hvchg_icl(void)
 	EQ(cpfix_hvchg_icl_ua(-1), 500000, "negative");
 }
 
+static void test_vbus_guard(void)
+{
+	/* In 2:1 mode, low VBAT plus a 600 mV headroom is the safe VBUS window. */
+	EQ(cpfix_vbus_guard(10800, 1, 3554, 600), 7708, "2:1 low SOC cap");
+	EQ(cpfix_vbus_guard(7600, 1, 3554, 600), 7600, "below cap unchanged");
+	/* 4:1 mode has its own voltage range and must not be capped here. */
+	EQ(cpfix_vbus_guard(10800, 0, 3554, 600), 10800, "4:1 unchanged");
+	EQ(cpfix_vbus_guard(10800, 4, 3554, 600), 10800, "4:1 explicit unchanged");
+	EQ(cpfix_vbus_guard(10800, 1, 0, 600), 10800, "unknown VBAT unchanged");
+	EQ(cpfix_vbus_guard(10800, 1, 3554, 0), 10800, "guard off unchanged");
+}
+
 int main(void)
 {
 	test_param_table();
@@ -237,5 +250,6 @@ int main(void)
 	test_fv();
 	test_clamp_r();
 	test_hvchg_icl();
+	test_vbus_guard();
 	return check_report();
 }
