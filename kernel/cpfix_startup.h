@@ -24,23 +24,66 @@ struct cpfix_start_sample {
 #define CP_SC_FAULT 0xcbU
 #define CP_START_RETRIES 3
 
-/* Baseline model for the initial red regression; not connected to kernel hooks. */
+/* Decisions for the verified SC8551 2:1 path only. Never a running-voltage cap. */
 static inline enum cpfix_start_action
 cpfix_start_decide(const struct cpfix_start_sample *s)
 {
+	unsigned int status = s->converter[0] | s->converter[1];
+	enum cpfix_start_action action;
 	int low, high;
 	if (s->mode != 1 || s->state < 1 || s->state > 3)
 		return CP_START_KEEP;
+	if (s->valid != CP_START_VALID || s->pd_type != 4 || s->request_failed ||
+	    s->cp_vbat <= 0 || s->cp_vbat > 5118 || s->vbus < 0 || s->vbus > 15356 ||
+	    s->converter[0] > 255 || s->converter[1] > 255 ||
+	    (status & CP_SC_FAULT) ||
+	    (status & (CP_SC_ERRORHI | CP_SC_ERRORLO)) == (CP_SC_ERRORHI | CP_SC_ERRORLO))
+		return CP_START_RECOVER;
 	if (s->state == 1) {
+		if (s->enabled || (status & CP_SC_SWITCHING) || s->init_count >= 39 ||
+		    s->min_request < 3600 || s->max_request > 15356 ||
+		    s->max_request < s->min_request || s->low_gap < 0 ||
+		    s->high_gap <= s->low_gap || s->high_gap > 2000)
+			return CP_START_RECOVER;
 		if (!s->init_count)
 			return CP_START_FIRST;
-		low = 2 * s->bms_vbat + s->low_gap;
-		high = 2 * s->bms_vbat + s->high_gap;
-		return s->vbus <= low ? CP_START_UP :
-			s->vbus >= high ? CP_START_DOWN : CP_START_READY;
+		low = 2 * s->cp_vbat + s->low_gap;
+		high = 2 * s->cp_vbat + s->high_gap;
+		/* Hardware window status takes priority over asynchronously sampled ADCs. */
+		if (status & CP_SC_ERRORHI)
+			action = CP_START_DOWN;
+		else if (status & CP_SC_ERRORLO)
+			action = CP_START_UP;
+		else
+			action = s->vbus <= low ? CP_START_UP :
+				s->vbus >= high ? CP_START_DOWN : CP_START_READY;
+		if (s->request < s->min_request || s->request > s->max_request ||
+		    (action == CP_START_UP && s->request > s->max_request - 40) ||
+		    (action == CP_START_DOWN && s->request < s->min_request + 40))
+			return CP_START_RECOVER;
+		return action;
 	}
-	if (s->state == 2 && s->enabled != 3)
-		return CP_START_WAIT;
-	return CP_START_KEEP;
+	if (status & (CP_SC_ERRORHI | CP_SC_ERRORLO))
+		return CP_START_RECOVER;
+	if (s->enabled == 3 && (s->converter[0] & CP_SC_SWITCHING) &&
+	    (s->converter[1] & CP_SC_SWITCHING))
+		return CP_START_KEEP;
+	return s->state == 2 && s->enable_count < 4 ? CP_START_WAIT : CP_START_RECOVER;
+}
+
+/* Called only after CP_START_FIRST validated the sample and bounds. */
+static inline int cpfix_start_first_mv(const struct cpfix_start_sample *s)
+{
+	int v = 2 * s->cp_vbat + s->low_gap;
+	return v < s->min_request ? s->min_request :
+		v > s->max_request ? s->max_request : v;
+}
+
+/* Vendor HOLD=1 retries through pump disable and buck fallback; EXIT=2 stops. */
+static inline int cpfix_start_failure(int *failures)
+{
+	if (*failures < CP_START_RETRIES)
+		++*failures;
+	return *failures < CP_START_RETRIES ? 1 : 2;
 }
 #endif

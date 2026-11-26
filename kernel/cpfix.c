@@ -258,6 +258,8 @@ static int cpfix_pre_p10(struct kprobe *p, struct pt_regs *regs)
 	return 0;
 }
 
+#include "cpfix_startup_hooks.h"
+
 static struct cpfix_point cpfix_points[] = {
 #define PP(pid, mod, sym, off, insn, fn)                                      \
 	{ .id = #pid, .module = mod, .symbol = sym, .offset = off,            \
@@ -419,6 +421,7 @@ static struct kobj_attribute cpfix_attr_fcc_effective = __ATTR_RO(fcc_effective)
 static struct kobj_attribute cpfix_attr_clamp = __ATTR_RO(clamp);
 static struct kobj_attribute cpfix_attr_fv_effective = __ATTR_RO(fv_effective);
 static struct kobj_attribute cpfix_attr_version = __ATTR_RO(version);
+static struct kobj_attribute cpfix_attr_startup = __ATTR_RO(startup);
 
 static struct attribute *cpfix_attrs[] = {
 	&cpfix_attr_patches.attr,
@@ -429,6 +432,7 @@ static struct attribute *cpfix_attrs[] = {
 	&cpfix_attr_clamp.attr,
 	&cpfix_attr_fv_effective.attr,
 	&cpfix_attr_version.attr,
+	&cpfix_attr_startup.attr,
 	NULL,
 };
 

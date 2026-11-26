@@ -19,6 +19,7 @@ int main(void)
 {
 	struct cpfix_start_sample s = failing_start();
 	unsigned int bit;
+	int failures = 0, i;
 	EQ(cpfix_start_decide(&s), CP_START_DOWN, "hardware ERRORHI overrides stale BMS window");
 	s.state = 2; s.enabled = 3; s.cp_vbat = 3182;
 	EQ(cpfix_start_decide(&s), CP_START_RECOVER, "321688.338: enabled but not switching");
@@ -66,5 +67,36 @@ int main(void)
 	EQ(cpfix_start_decide(&s), CP_START_KEEP, "4:1 is outside this verified repair");
 	s.mode = 1; s.state = 4;
 	EQ(cpfix_start_decide(&s), CP_START_KEEP, "never interfere with vendor EXIT");
+	s = failing_start(); s.init_count = 0; s.cp_vbat = 3642;
+	EQ(cpfix_start_decide(&s), CP_START_FIRST, "first request uses a valid fresh sample");
+	EQ(cpfix_start_first_mv(&s), 7684, "entry setpoint from pump-side VBAT");
+	s.max_request = 7600;
+	EQ(cpfix_start_first_mv(&s), 7600, "entry obeys source maximum");
+	s.cp_vbat = 1400;
+	EQ(cpfix_start_first_mv(&s), 3600, "entry obeys vendor lower bound");
+	EQ(cpfix_start_failure(&failures), 1, "first failure uses vendor HOLD recovery");
+	EQ(cpfix_start_failure(&failures), 1, "second failure uses vendor HOLD recovery");
+	for (i = 0; i < 100; i++)
+		EQ(cpfix_start_failure(&failures), 2, "persistent fault ends retry loop %d", i);
+	EQ(failures, 3, "retry counter saturates");
+	/* Coarse offline plant: source follows request with a 175mV offset,
+	 * hardware window is 400..600mV above 2*CP_VBAT. This is a convergence
+	 * check, not a claim to model the SC8551 analogue thresholds or the battery. */
+	s = failing_start();
+	for (i = 0; i < 40; i++) {
+		enum cpfix_start_action a;
+		s.vbus = s.request + 175;
+		s.converter[0] = s.converter[1] = s.vbus >= 2*s.cp_vbat+600 ? 0x10 :
+			s.vbus <= 2*s.cp_vbat+400 ? 0x20 : 0;
+		a = cpfix_start_decide(&s);
+		if (a == CP_START_READY)
+			break;
+		EQ(a, CP_START_DOWN, "initial ERRORHI moves toward the startup window");
+		s.request -= 40;
+		s.init_count++;
+	}
+	LE(i, 38, "startup reaches a valid window before vendor timeout");
+	s.state = 2; s.enabled = 3; s.converter[0] = s.converter[1] = 0x04;
+	EQ(cpfix_start_decide(&s), CP_START_KEEP, "converged startup can enter regulation");
 	return check_report();
 }
