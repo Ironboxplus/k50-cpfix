@@ -59,7 +59,7 @@ def main():
     words(pdm, main_sm, 0x9d0, [0x394002c1, 0x34000281, 0x394002a8, 0x34000248])
     for off in (0xac0, 0x1030, 0x1280):
         call(pdm, main_sm, off, "adapter_dev_set_cap_xm")
-    words(pdm, main_sm, 0x10d4, [0x9100e273])
+    words(pdm, main_sm, 0x10d0, [0x52803e80])
     call(pdm, main_sm, 0x10d8, "__msecs_to_jiffies")
     call(pdm, main_sm, 0x10f0, "queue_delayed_work_on")
     # The detach observer runs only after the previous worker is joined.
