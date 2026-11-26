@@ -133,3 +133,18 @@ samples over about 30 seconds: USB input 8.612–8.650 V at 1.537–1.690 A,
 battery current -2.330 to -2.356 A, CC 2500 mA, AICR 2000 mA, temperature
 41.2–41.4°C. This proves stable operation at that observed state, not a
 low-SOC PPS maximum-power result.
+
+## Guarded normal-PPS smoke test
+
+On a later session at about 70% SOC and 40.1°C, the a84f2db module was loaded
+temporarily with `startup_guard=0`. It observed a healthy PPS state:
+`state=3`, `pd_type=4`, `bypass=0`, `valid=0x3f`, `converter=04,04`,
+`enabled=3`; pump currents were about 959mA and 851mA. The guard was then set
+to 1 for a short smoke test. The published sample changed to `apply=1` while
+remaining `state=3`, `converter=04,04`, with pump currents about 910mA and
+918mA; battery status remained Charging and no recovery was recorded. This
+proves the enabled guard does not disrupt a healthy normal PPS session. It does
+not reproduce the low-SOC ERRORHI/no-switching failure.
+
+The temporary module was then unloaded and 0.2.19-c7d00f3928da was restored;
+the phone was left on the original module and parameters.
