@@ -125,9 +125,17 @@ other ratios retain their existing behavior. This is not yet a released fix.
 * Startup waits for both converters to switch. A hardware window error, invalid
   sample, exhausted wait, lost switching or failed PD request selects the vendor
   EXIT branch, preserving its pump-disable and power-path handling.
-* The first two recoveries use vendor HOLD (retry); the third uses vendor EXIT
-  (stop the pump retry loop). Five seconds of healthy TUNE resets that budget.
-  A new ENTRY after terminal stop also resets it. No protection is cleared.
+* Recovery uses vendor HOLD, which runs the pump-disable and buck fallback path.
+  After that path completes, the next PDM work item is delayed by 2 seconds,
+  then 5 seconds, then 15 seconds for repeated failures. Reaching the last
+  backoff stage does not permanently stop recovery or require unplugging.
+  Five seconds of healthy TUNE resets the backoff. This replaces the initial
+  three-failures-to-terminal-EXIT development design, which did not satisfy
+  automatic recovery within one connection.
+* A detach observer runs after the vendor's cancel_delayed_work_sync has joined
+  the PDM worker. It clears only cpfix's retry, pending-PD-result and observation
+  state, so a new connection cannot inherit a previous failure. Neither new
+  hook clears hardware protection flags or changes the vendor detach sequence.
 
 Actions 45773849582 compiled the baseline model and then failed the behavioral
 assertions, including the actual false-start snapshots. Actions 45774513383

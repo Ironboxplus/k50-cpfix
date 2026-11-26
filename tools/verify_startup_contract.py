@@ -59,6 +59,14 @@ def main():
     words(pdm, main_sm, 0x9d0, [0x394002c1, 0x34000281, 0x394002a8, 0x34000248])
     for off in (0xac0, 0x1030, 0x1280):
         call(pdm, main_sm, off, "adapter_dev_set_cap_xm")
+    words(pdm, main_sm, 0x10d4, [0x9100e273])
+    call(pdm, main_sm, 0x10d8, "__msecs_to_jiffies")
+    call(pdm, main_sm, 0x10f0, "queue_delayed_work_on")
+    # The detach observer runs only after the previous worker is joined.
+    words(pdm, "pdm_psy_change", 0x1ac, [0x3908927f])
+    words(pdm, "pdm_psy_change", 0x1bc, [0x9100e260])
+    call(pdm, "pdm_psy_change", 0x1c0, "cancel_delayed_work_sync")
+    words(pdm, "pdm_psy_change", 0x1c4, [0x91030260])
     # SC8551 private chip pointer offset is taken from the actual getter.
     words(sc, "ops_sc8551_get_charge_enable", 0x2c, [0x52800181])
     words(sc, "ops_sc8551_get_charge_enable", 0x34, [0xf9407013])

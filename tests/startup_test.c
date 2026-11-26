@@ -81,11 +81,13 @@ int main(void)
 	EQ(cpfix_start_first_mv(&s), 7600, "entry obeys source maximum");
 	s.cp_vbat = 1400;
 	EQ(cpfix_start_first_mv(&s), 3600, "entry obeys vendor lower bound");
-	EQ(cpfix_start_failure(&failures), 1, "first failure uses vendor HOLD recovery");
-	EQ(cpfix_start_failure(&failures), 1, "second failure uses vendor HOLD recovery");
+	EQ(cpfix_start_backoff_ms(&failures), 2000, "first failure retries after restoring buck");
+	EQ(cpfix_start_backoff_ms(&failures), 5000, "repeated failure increases delay");
 	for (i = 0; i < 100; i++)
-		EQ(cpfix_start_failure(&failures), 2, "persistent fault ends retry loop %d", i);
-	EQ(failures, 3, "retry counter saturates");
+		EQ(cpfix_start_backoff_ms(&failures), 15000, "persistent fault waits, not permanent lockout %d", i);
+	EQ(failures, 3, "backoff stage saturates");
+	failures = 0;
+	EQ(cpfix_start_backoff_ms(&failures), 2000, "new session starts with its own retry budget");
 	/* Coarse offline plant: source follows request with a 175mV offset,
 	 * hardware window is 400..600mV above 2*CP_VBAT. This is a convergence
 	 * check, not a claim to model the SC8551 analogue thresholds or the battery. */

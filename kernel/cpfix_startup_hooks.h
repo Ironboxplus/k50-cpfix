@@ -14,9 +14,9 @@ static struct {
 	enum cpfix_start_action action;
 	enum cpfix_start_action published_action;
 	unsigned long published_stamp;
-	bool published_apply;
-	bool collecting, apply, terminal, healthy;
-	int failures, last_ret;
+	bool published_apply, published_available;
+	bool collecting, apply, healthy;
+	int failures, last_ret, retry_delay_ms;
 	bool request_failed;
 	unsigned long scans, recoveries;
 } cp_start;
@@ -44,11 +44,11 @@ static int cpfix_pre_start_begin(struct kprobe *p, struct pt_regs *r)
 	if (!READ_ONCE(cpfix_armed))
 		return 0;
 	raw_spin_lock_irqsave(&cp_start_lock, irq);
-	if (cp_start.pdpm != base || (cp_start.terminal && cp_start_int(base, 0x218) == 0)) {
+	if (cp_start.pdpm != base) {
 		cp_start.failures = 0;
-		cp_start.terminal = false;
 		cp_start.healthy = false;
 	}
+	cp_start.retry_delay_ms = 0;
 	if (cp_start_int(base, 0x218) == 0) {
 		cp_start.request_failed = false;
 		cp_start.last_ret = 0;
@@ -123,7 +123,7 @@ static int cpfix_pre_start_dispatch(struct kprobe *p, struct pt_regs *r)
 {
 	unsigned long irq, base = r->regs[19];
 	struct cpfix_start_sample *s = &cp_start.sample;
-	int max_dt, max_apdo, status;
+	int max_dt, max_apdo;
 	bool on = cpfix_on(p);
 	if (!READ_ONCE(cpfix_armed))
 		return 0;
@@ -156,10 +156,9 @@ static int cpfix_pre_start_dispatch(struct kprobe *p, struct pt_regs *r)
 	cp_start.action = cpfix_start_decide(s);
 	cp_start.scans++;
 	if (cp_start.apply && cp_start.action == CP_START_RECOVER) {
-		status = cpfix_start_failure(&cp_start.failures);
-		cp_start.terminal = status == 2;
+		cp_start.retry_delay_ms = cpfix_start_backoff_ms(&cp_start.failures);
 		cp_start.recoveries++;
-		WRITE_ONCE(*(int *)(base + 0x21c), status);
+		WRITE_ONCE(*(int *)(base + 0x21c), 1); /* vendor HOLD, not terminal EXIT */
 		WRITE_ONCE(*(int *)(base + 0x218), 4);
 		set_w(r, 9, 4);
 	}
@@ -178,7 +177,52 @@ static int cpfix_pre_start_dispatch(struct kprobe *p, struct pt_regs *r)
 	cp_start.published_action = cp_start.action;
 	cp_start.published_apply = cp_start.apply;
 	cp_start.published_stamp = cp_start.stamp;
+	cp_start.published_available = true;
 out:
+	raw_spin_unlock_irqrestore(&cp_start_lock, irq);
+	return 0;
+}
+
+/* pdm_main_sm+0x10d4: W0 is the delay in milliseconds, before conversion to
+ * jiffies. This is reached after vendor EXIT/HOLD finished restoring powerpath.
+ * Change only the next scheduling delay; no sleep or new work item in a probe. */
+static int cpfix_pre_start_retry_delay(struct kprobe *p, struct pt_regs *r)
+{
+	unsigned long irq;
+	cpfix_on(p);
+	if (!READ_ONCE(cpfix_armed))
+		return 0;
+	raw_spin_lock_irqsave(&cp_start_lock, irq);
+	if (cp_start_owned(r->regs[19]) && cp_start.apply && cp_start.retry_delay_ms) {
+		set_w(r, 0, max((int)r->regs[0], cp_start.retry_delay_ms));
+		cp_start.retry_delay_ms = 0;
+	}
+	raw_spin_unlock_irqrestore(&cp_start_lock, irq);
+	return 0;
+}
+
+/* pdm_psy_change+0x1c4: after cancel_delayed_work_sync(main_sm_work) has joined
+ * the old worker. Reset our state only, without touching the vendor detach path. */
+static int cpfix_pre_start_detached(struct kprobe *p, struct pt_regs *r)
+{
+	unsigned long irq;
+	cpfix_on(p);
+	if (!READ_ONCE(cpfix_armed))
+		return 0;
+	raw_spin_lock_irqsave(&cp_start_lock, irq);
+	if (cp_start.pdpm == r->regs[19]) {
+		cp_start.owner = NULL;
+		cp_start.collecting = false;
+		cp_start.apply = false;
+		cp_start.healthy = false;
+		cp_start.failures = 0;
+		cp_start.request_failed = false;
+		cp_start.last_ret = 0;
+		cp_start.retry_delay_ms = 0;
+		cp_start.published.valid = 0;
+		cp_start.published_apply = false;
+		cp_start.published_available = false;
+	}
 	raw_spin_unlock_irqrestore(&cp_start_lock, irq);
 	return 0;
 }
@@ -258,7 +302,8 @@ static ssize_t startup_show(struct kobject *kobj, struct kobj_attribute *attr, c
 	s = cp_start.published;
 	action = cp_start.published_action; failures = cp_start.failures; ret = cp_start.last_ret;
 	apply = cp_start.published_apply; scans = cp_start.scans; recoveries = cp_start.recoveries;
-	age = scans ? (long)jiffies_to_msecs(jiffies - cp_start.published_stamp) : -1;
+	age = cp_start.published_available ?
+		(long)jiffies_to_msecs(jiffies - cp_start.published_stamp) : -1;
 	raw_spin_unlock_irqrestore(&cp_start_lock, irq);
 	return scnprintf(buf, PAGE_SIZE,
 		"state=%d mode=%d pd_type=%d bypass=%d valid=%#x converter=%02x,%02x enabled=%u "

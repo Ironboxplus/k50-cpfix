@@ -22,7 +22,7 @@ struct cpfix_start_sample {
 #define CP_SC_ERRORHI 0x10U
 #define CP_SC_ERRORLO 0x20U
 #define CP_SC_FAULT 0xcbU
-#define CP_START_RETRIES 3
+#define CP_START_BACKOFF_STAGES 3
 
 /* Decisions for the verified SC8551 2:1 path only. Never a running-voltage cap. */
 static inline enum cpfix_start_action
@@ -98,11 +98,12 @@ static inline void cpfix_start_window_operands(enum cpfix_start_action action,
 	}
 }
 
-/* Vendor HOLD=1 retries through pump disable and buck fallback; EXIT=2 stops. */
-static inline int cpfix_start_failure(int *failures)
+/* Delay automatic retry after vendor HOLD has disabled the pumps and restored
+ * the buck path. Never turn a transient startup fault into an unplug requirement. */
+static inline int cpfix_start_backoff_ms(int *failures)
 {
-	if (*failures < CP_START_RETRIES)
+	if (*failures < CP_START_BACKOFF_STAGES)
 		++*failures;
-	return *failures < CP_START_RETRIES ? 1 : 2;
+	return *failures == 1 ? 2000 : *failures == 2 ? 5000 : 15000;
 }
 #endif

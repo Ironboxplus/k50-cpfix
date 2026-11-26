@@ -32,3 +32,5 @@ PP(S9, "pd_cp_manager", "pdm_main_sm", 0x9d4, 0x34000281, cpfix_pre_start_enable
 PP(S10, "pd_cp_manager", "pdm_main_sm", 0xac8, 0x7100051f, cpfix_pre_start_pd_result)
 PP(S11, "pd_cp_manager", "pdm_main_sm", 0x1034, 0x71000c1f, cpfix_pre_start_pd_result)
 PP(S12, "pd_cp_manager", "pdm_main_sm", 0x1284, 0x34000200, cpfix_pre_start_pd_result)
+PP(S13, "pd_cp_manager", "pdm_main_sm", 0x10d4, 0x9100e273, cpfix_pre_start_retry_delay)
+PP(S14, "pd_cp_manager", "pdm_psy_change", 0x1c4, 0x91030260, cpfix_pre_start_detached)
