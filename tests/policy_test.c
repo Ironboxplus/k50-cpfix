@@ -28,7 +28,7 @@ static void test_param_table(void)
 		{ "thermal_override", 1, 0, 1, 0 },
 		{ "thermal_override_ma", 12400, 2000, 12400, 0 },
 		{ "batt_temp_hi", 420, 300, 460, 0 },
-		{ "batt_temp_lo", 400, 300, 460, 0 },
+		{ "batt_temp_lo", 410, 300, 460, 0 },
 		{ "fcc_cap_ma", 0, 500, 12400, 1 },
 		{ "clamp_headroom_mv", 400, 0, 800, 0 },
 		{ "fv_drop_max_mv", 0, 0, 100, 0 },

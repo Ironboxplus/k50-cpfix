@@ -52,7 +52,7 @@ object Params {
             unit = "mA", step = 100),
         Param("batt_temp_hi", 420, 300, 460, false, "电池温度达到此值恢复原厂温控", "旧脚本 42.0 °C",
             unit = "°C", step = 10, scale = 10),
-        Param("batt_temp_lo", 400, 300, 460, false, "电池温度降到此值再放宽", "旧脚本 40.0 °C（至少比上限低 1.0 °C）",
+        Param("batt_temp_lo", 410, 300, 460, false, "电池温度降到此值再放宽", "默认 41.0 °C（至少比上限低 1.0 °C）",
             unit = "°C", step = 10, scale = 10),
         Param("fcc_cap_ma", 0, 500, 12400, true, "手动充电电流上限", "原厂无此项",
             unit = "mA", step = 100, zeroLabel = "不限制"),

@@ -22,7 +22,7 @@
 	X(thermal_override, 1, 0, 1, 0)                \
 	X(thermal_override_ma, 12400, 2000, 12400, 0)  \
 	X(batt_temp_hi, 420, 300, 460, 0)              \
-	X(batt_temp_lo, 400, 300, 460, 0)              \
+	X(batt_temp_lo, 410, 300, 460, 0)              \
 	X(fcc_cap_ma, 0, 500, 12400, 1)                \
 	X(clamp_headroom_mv, 400, 0, 800, 0)           \
 	X(fv_drop_max_mv, 0, 0, 100, 0)                \
