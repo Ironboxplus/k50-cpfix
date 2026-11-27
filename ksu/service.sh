@@ -6,7 +6,7 @@ DATA=/data/adb/cpfix
 CONF=$DATA/cpfix.conf
 LOG=$DATA/cpfix.log
 # keys accepted from cpfix.conf: the module parameters, nothing else
-KEYS="enable entry_vbat_margin_mv entry_high_soc fast_ramp taper_reduce_ma ffc_any_pps thermal_override thermal_override_ma batt_temp_hi batt_temp_lo fcc_cap_ma clamp_headroom_mv fv_drop_max_mv fv_ceiling_mv hvchg_icl_ma"
+KEYS="enable startup_guard entry_vbat_margin_mv entry_high_soc fast_ramp taper_reduce_ma ffc_any_pps thermal_override thermal_override_ma batt_temp_hi batt_temp_lo fcc_cap_ma clamp_headroom_mv fv_drop_max_mv fv_ceiling_mv hvchg_icl_ma"
 
 # The old /data/adb/service.d/k50_charge_unthrottle.sh keeps running beside cpfix: P6 does not
 # reach the buck charging current, which follows the charge_control_limit level. Undo the flag

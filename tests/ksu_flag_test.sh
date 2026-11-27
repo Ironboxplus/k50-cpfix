@@ -17,6 +17,7 @@ fail() { failed=$((failed + 1)); echo "FAIL $1"; }
 code() { grep -v '^[[:space:]]*#' "$1"; }
 
 if code "$SERVICE" | grep -q 'OLD_FLAG'; then fail "$SERVICE: OLD_FLAG still used"; else ok "$SERVICE: no OLD_FLAG"; fi
+if code "$SERVICE" | grep -q 'KEYS=.*startup_guard'; then ok "$SERVICE: startup_guard accepted at boot"; else fail "$SERVICE: startup_guard missing from boot parameter allowlist"; fi
 if code "$SERVICE" | grep -q 'touch'; then fail "$SERVICE: touches a file"; else ok "$SERVICE: no touch"; fi
 n=$(code "$SERVICE" | grep -c 'charge_unthrottle')
 r=$(code "$SERVICE" | grep -cxF "rm -f $FLAG")
