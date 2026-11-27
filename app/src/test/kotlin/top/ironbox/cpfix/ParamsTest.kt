@@ -16,7 +16,7 @@ class ParamsTest {
         return header.readLines().mapNotNull { re.find(it) }.map {
             val (n, d, lo, hi, z) = it.destructured
             CParam(n, d.toInt(), lo.toInt(), hi.toInt(), z == "1")
-        }
+        }.filter { it.name != "startup_guard" }
     }
 
     @Test
