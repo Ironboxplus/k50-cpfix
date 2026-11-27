@@ -99,6 +99,11 @@ static void test_high_soc(void)
 
 static void test_hysteresis(void)
 {
+	/* First sample must seed an inactive state from the upper threshold. */
+	EQ(cpfix_thermal_initial(401, 420), 1, "first sample below hi enables");
+	EQ(cpfix_thermal_initial(419, 420), 1, "first sample in band enables");
+	EQ(cpfix_thermal_initial(420, 420), 0, "first sample at hi disables");
+	EQ(cpfix_thermal_initial(450, 420), 0, "first sample above hi disables");
 	/* 419 -> 420 -> 410 -> 400 -> 399 with hi 420 / lo 400, starting active */
 	static const int temps[] = { 419, 420, 410, 400, 399 };
 	static const int want[] = { 1, 0, 0, 1, 1 };

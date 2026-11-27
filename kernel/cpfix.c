@@ -334,14 +334,18 @@ static void cpfix_work_fn(struct work_struct *work)
 {
 	struct power_supply *psy = power_supply_get_by_name("battery");
 	union power_supply_propval v;
+	int temp_valid, thermal_state;
 
 	if (psy) {
 		if (!power_supply_get_property(psy, POWER_SUPPLY_PROP_TEMP, &v)) {
+			temp_valid = atomic_read(&cpfix_temp_valid);
+			thermal_state = temp_valid ?
+				cpfix_thermal_next(atomic_read(&cpfix_thermal_state), v.intval,
+						   READ_ONCE(cp_batt_temp_hi),
+						   READ_ONCE(cp_batt_temp_lo)) :
+				cpfix_thermal_initial(v.intval, READ_ONCE(cp_batt_temp_hi));
 			atomic_set(&cpfix_temp, v.intval);
-			atomic_set(&cpfix_thermal_state,
-				   cpfix_thermal_next(atomic_read(&cpfix_thermal_state), v.intval,
-						      READ_ONCE(cp_batt_temp_hi),
-						      READ_ONCE(cp_batt_temp_lo)));
+			atomic_set(&cpfix_thermal_state, thermal_state);
 			atomic_long_set(&cpfix_temp_stamp, jiffies);
 			atomic_set(&cpfix_temp_valid, 1);
 		}

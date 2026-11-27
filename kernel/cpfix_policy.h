@@ -88,6 +88,13 @@ static inline int cpfix_thermal_next(int active, int temp, int hi, int lo)
 	return active;
 }
 
+/* Seed the hysteresis state from the first valid sample.  A zero-initialized
+ * state must not strand a cool battery in the dead band until it reaches lo. */
+static inline int cpfix_thermal_initial(int temp, int hi)
+{
+	return temp < hi;
+}
+
 static inline int cpfix_temp_fresh(int valid, unsigned long age_ms)
 {
 	return valid && age_ms <= CPFIX_TEMP_MAX_AGE_MS;
